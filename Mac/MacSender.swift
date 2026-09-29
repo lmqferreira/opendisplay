@@ -187,6 +187,11 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
     // `queue`.
     private var captureRecoveryFailures = 0
     private let maxCaptureRecoveryFailures = 5
+    // Display sleep and screen lock make every recovery attempt fail until
+    // the user is back, so rounds are deferred instead of spent on them —
+    // otherwise any sleep longer than the budget ends the session. Set while
+    // deferring so the wait logs once. On `queue`.
+    private var waitingForConsole = false
 
     // Consecutive actively-refused dials on a previously connected session.
     // Refusal is unambiguous: the device is reachable but nothing listens,
@@ -1108,6 +1113,18 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         queue.asyncAfter(deadline: .now() + 3.0) { [weak self] in
             guard let self, !self.stopped, self.stream == nil,
                   let hello = self.lastHello else { return }
+            guard self.consoleCanCapture else {
+                if !self.waitingForConsole {
+                    self.waitingForConsole = true
+                    Log.info("capture down while the display sleeps or the screen is locked — waiting for the user before retrying")
+                }
+                self.scheduleCaptureRecovery()
+                return
+            }
+            if self.waitingForConsole {
+                self.waitingForConsole = false
+                Log.info("console is back — resuming capture recovery")
+            }
             // Does our virtual display still exist? CGDisplayBounds returns a
             // zero rect for an unknown id, so a non-empty bounds means it's live.
             // Test isEmpty, not isNull: isNull is only true for the special
@@ -1154,6 +1171,14 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         let onConsole = info[kCGSessionOnConsoleKey as String] as? Bool ?? true
         let locked = info["CGSSessionScreenIsLocked"] as? Bool ?? false
         return onConsole && !locked
+    }
+
+    /// Whether a recovery attempt can succeed right now. SCK finds no
+    /// capturable displays while the main display sleeps or the screen is
+    /// locked (display sleep drops capture seconds before the lock engages),
+    /// so attempts then are doomed and must not count against the budget.
+    private var consoleCanCapture: Bool {
+        consoleIsInteractive && CGDisplayIsAsleep(CGMainDisplayID()) == 0
     }
 
     /// On `queue`: after a recovery round, re-arm the loop while capture is
