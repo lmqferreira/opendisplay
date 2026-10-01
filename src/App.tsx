@@ -367,15 +367,42 @@ export default function App() {
               </thead>
               <tbody>
                 <tr><td>Price</td><td className="mark-yes os">Free &amp; open source</td><td>Free</td><td className="mark-no">Subscription</td><td className="mark-no">$$$ + dongle</td></tr>
-                <tr><td>iPhone as display</td><td className="mark-yes os">✓</td><td className="mark-no">✕</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td></tr>
+                <tr><td>iPhone as display</td><td className="mark-yes os">✓</td><td className="mark-no">✕</td><td className="mark-yes">✓</td><td className="mark-no">✕</td></tr>
                 <tr><td>Mac as display</td><td className="mark-yes os">✓</td><td className="mark-no">✕</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td></tr>
                 <tr><td>Different Apple IDs</td><td className="mark-yes os">✓</td><td className="mark-no">✕</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td></tr>
-                <tr><td>No account / sign-up</td><td className="mark-yes os">✓</td><td>Apple&nbsp;ID</td><td className="mark-no">✕</td><td>—</td></tr>
-                <tr><td>Wired USB</td><td className="mark-yes os">✓</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td><td className="mark-no">✕</td></tr>
-                <tr><td>Open source</td><td className="mark-yes os">✓</td><td>—</td><td className="mark-no">✕</td><td className="mark-no">✕</td></tr>
+                <tr><td>No account / sign-up</td><td className="mark-yes os">✓</td><td>Apple&nbsp;ID</td><td className="mark-no">✕</td><td>?</td></tr>
+                <tr><td>Wired USB</td><td className="mark-yes os">✓</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td></tr>
+                <tr><td>Open source</td><td className="mark-yes os">✓</td><td className="mark-no">✕</td><td className="mark-no">✕</td><td className="mark-no">✕</td></tr>
               </tbody>
             </table>
           </div>
+
+          <h3 className="tbl-head">A spare Mac as the display</h3>
+          <p className="tbl-note">For a Mac receiver, Apple's answer is AirPlay to Mac, not Sidecar. Luna and Duet have
+          Mac-to-Mac modes, and a few newer apps do only this, mostly for a 5K iMac next to an Apple silicon laptop.</p>
+          <div className="tbl-scroll">
+            <table className="wide">
+              <thead>
+                <tr><th></th><th className="os">OpenDisplay</th><th>AirPlay to Mac</th><th>Luna</th><th>Duet Air</th><th><a href="https://github.com/swellweb/targetBridge">TargetBridge</a></th><th><a href="https://github.com/amineross/sharp">Sharp</a></th><th><a href="https://www.retinarelay.com/">RetinaRelay</a></th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Price</td><td className="mark-yes os">Free &amp; open source</td><td>Free</td><td className="mark-no">$89.99 + dongle</td><td className="mark-no">Subscription</td><td className="mark-yes">Free &amp; open source</td><td className="mark-yes">Free &amp; open source</td><td>$49 one-time</td></tr>
+                <tr><td>Receiving Mac</td><td className="mark-yes os">macOS&nbsp;12+</td><td className="mark-no">iMac 2019+, MacBook 2018+</td><td>macOS&nbsp;10.13+</td><td>macOS&nbsp;10.14.6+</td><td>macOS&nbsp;11+</td><td>macOS&nbsp;10.15+</td><td>iMac 2012+</td></tr>
+                <tr><td>Intel Mac as sender</td><td className="mark-yes os">✓</td><td>2018+</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td><td className="mark-no">✕</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td></tr>
+                <tr><td>Wi-Fi</td><td className="mark-yes os">✓</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td><td>Experimental</td><td className="mark-no">✕</td><td>Fallback</td></tr>
+                <tr><td>Cable</td><td className="mark-yes os">Thunderbolt, USB-C, Ethernet</td><td>USB</td><td className="mark-yes">✓</td><td>?</td><td>Thunderbolt</td><td>Ethernet</td><td className="mark-yes">Thunderbolt, USB&nbsp;3, Ethernet</td></tr>
+                <tr><td>Native 5K on a 5K iMac</td><td className="mark-yes os">✓ ~30&nbsp;fps</td><td>?</td><td className="mark-yes">✓</td><td>?</td><td className="mark-yes">✓ 48&nbsp;fps</td><td>Experimental</td><td className="mark-yes">✓ 60&nbsp;fps</td></tr>
+                <tr><td>No account, any Apple&nbsp;ID</td><td className="mark-yes os">✓</td><td className="mark-no">Same Apple&nbsp;ID</td><td className="mark-yes">✓</td><td className="mark-no">✕</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td></tr>
+                <tr><td>Keyboard &amp; mouse at the receiver</td><td className="mark-no os">Planned</td><td className="mark-no">✕</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td><td>?</td><td>?</td></tr>
+                <tr><td>Audio</td><td className="mark-no os">✕</td><td className="mark-yes">✓</td><td>?</td><td>?</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td></tr>
+                <tr><td>Shut down the receiver from the sender</td><td className="mark-yes os">✓ over a cable</td><td>?</td><td>?</td><td>?</td><td>?</td><td>?</td><td>?</td></tr>
+                <tr><td>iPhone &amp; iPad too</td><td className="mark-yes os">✓</td><td className="mark-no">✕</td><td>iPad only</td><td className="mark-yes">✓</td><td className="mark-no">✕</td><td className="mark-no">✕</td><td className="mark-no">✕</td></tr>
+                <tr><td>Open source</td><td className="mark-yes os">✓</td><td className="mark-no">✕</td><td className="mark-no">✕</td><td className="mark-no">✕</td><td className="mark-yes">✓</td><td className="mark-yes">✓</td><td className="mark-no">✕</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="tbl-note">? means the project doesn't document it. Taken from each project's own site or README,
+          October 2026.</p>
         </div>
       </section>
 

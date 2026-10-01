@@ -70,15 +70,45 @@ pipeline, USB transport, input injection) are already working.
 
 ## Comparison
 
+OpenDisplay is open source, so you can audit exactly what runs on your Mac
+and build it yourself.
+
 | | OpenDisplay | Apple Sidecar | Duet Display | Luna Display |
 |---|---|---|---|---|
 | Price | **Free, open source** | Free | Subscription | $$$ + dongle |
-| iPhone as display | ✅ | ❌ (iPad only) | ✅ | ✅ |
+| iPhone as display | ✅ | ❌ (iPad only) | ✅ | ❌ (iPad only) |
+| Mac as display | ✅ | ❌ | ✅ | ✅ |
 | Different Apple IDs | ✅ | ❌ | ✅ | ✅ |
-| Wired (USB) | ✅ | ✅ | ✅ | ❌ |
-| True extension | ✅ | ✅ | ✅ | ✅ |
-| Touch input | ✅ | ✅ | ✅ | ✅ |
-| Self-hosted / auditable | ✅ | — | ❌ | ❌ |
+| No account / sign-up | ✅ | Apple ID | ❌ | ? |
+| Wired (USB) | ✅ | ✅ | ✅ | ✅ |
+| Open source | ✅ | ❌ | ❌ | ❌ |
+
+### A spare Mac as the display
+
+For a Mac receiver, the closest Apple feature is AirPlay to Mac, not Sidecar.
+Luna and Duet both have Mac-to-Mac modes. A few newer apps target only this
+use case, mostly a 5K iMac next to an Apple silicon laptop.
+
+| | OpenDisplay | [AirPlay to Mac](https://support.apple.com/guide/mac-help/use-airplay-to-stream-to-a-mac-mchl15c9e4b5/mac) | [Luna Display](https://astropad.com/product/lunadisplay/) | [Duet Air](https://www.duetdisplay.com/) | [TargetBridge](https://github.com/swellweb/targetBridge) | [Sharp](https://github.com/amineross/sharp) | [RetinaRelay](https://www.retinarelay.com/) |
+|---|---|---|---|---|---|---|---|
+| Price | **Free, open source** (GPLv3) | Free | $89.99 + dongle | Subscription | Free, open source (MIT) | Free, open source (GPLv3) | $49 one-time |
+| Receiving Mac | macOS 12+ | iMac 2019+, MacBook 2018+ | macOS 10.13+ | macOS 10.14.6+ | macOS 11+ | macOS 10.15+ | iMac 2012+, macOS 10.15+ |
+| Intel Mac as sender | ✅ | 2018+ | ✅ | ✅ | ❌ (Apple silicon only) | ✅ | ✅ |
+| Wi-Fi | ✅ | ✅ | ✅ | ✅ | Experimental | ❌ | Fallback |
+| Cable | ✅ Thunderbolt, USB-C, Ethernet | ✅ USB | ✅ | ? | ✅ Thunderbolt | ✅ Ethernet only | ✅ Thunderbolt, USB 3, Ethernet |
+| Native 5K on a 5K iMac | ✅ ~30 fps | ? | ✅ | ? | ✅ 48 fps (60 experimental) | Experimental (1440p default) | ✅ 60 fps |
+| Different Apple IDs, no account | ✅ | Same Apple ID for full quality | ✅ | ❌ (account) | ✅ | ✅ | ✅ |
+| Several receiving Macs | ✅ | ? | ? | ✅ | ✅ | ? | ? |
+| Keyboard and mouse at the receiving Mac | ❌ ([planned](https://github.com/peetzweg/opendisplay/issues/16)) | ❌ | ✅ | ✅ | ✅ | ? | ? |
+| Audio | ❌ | ✅ | ? | ? | ✅ | ✅ | ✅ |
+| Shut down the receiving Mac from the sender | ✅ over a cable | ? | ? | ? | ? | ? | ? |
+| iPhone and iPad as displays too | ✅ | ❌ | iPad only | ✅ | ❌ | ❌ | ❌ |
+
+? means the project does not document it. Figures come from each project's own site or README
+as of October 2026. Also in this space: [MacDisplay](https://macdisplay.it)
+(paid), [Phoenix Display](https://fablab503-collab.github.io/PhoenixDisplay/)
+(new; the App Store version mirrors only), and Apple's Target Display Mode,
+which only works on non-Retina iMacs from 2009 to 2014.
 
 ## FAQ
 
