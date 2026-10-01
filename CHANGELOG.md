@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.25.0](https://github.com/peetzweg/opendisplay/compare/v1.24.0...v1.25.0) (2026-10-01)
+
+
+### Features
+
+* **ios:** tidy idle screen, rate prompt and About links ([#350](https://github.com/peetzweg/opendisplay/issues/350)) ([472e785](https://github.com/peetzweg/opendisplay/commit/472e785a619e71373d4dfd9205ee13d100ac0da4))
+* **mac:** per-device Display size on the sender ([#347](https://github.com/peetzweg/opendisplay/issues/347)) ([a930071](https://github.com/peetzweg/opendisplay/commit/a9300712e97185608b21b7e8a12bf5e7f35fdbbd))
+* **mac:** sender decides the desktop from hello.panel ([#345](https://github.com/peetzweg/opendisplay/issues/345)) ([f0d211a](https://github.com/peetzweg/opendisplay/commit/f0d211a0615c4adef31d57fb88a836c18c4af891))
+
+
+### Bug Fixes
+
+* **mac:** Display size popover hugs its content, captions show only the size ([#352](https://github.com/peetzweg/opendisplay/issues/352)) ([b3c909a](https://github.com/peetzweg/opendisplay/commit/b3c909adbf2e13710718cbec7f371d068e5d5be4))
+* **mac:** keep small iPhones at 2x with the macOS minimum ([#346](https://github.com/peetzweg/opendisplay/issues/346)) ([d24afad](https://github.com/peetzweg/opendisplay/commit/d24afad70333cd83b14412305522b8ee62c30db0))
+
 ## [1.24.0](https://github.com/peetzweg/opendisplay/compare/v1.23.0...v1.24.0) (2026-09-30)
 
 
