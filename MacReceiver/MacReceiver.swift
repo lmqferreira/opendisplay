@@ -11,6 +11,7 @@
 
 import AppKit
 import AVFoundation
+import VideoToolbox
 import Combine
 import IOKit.pwr_mgt
 import SwiftUI
@@ -35,6 +36,9 @@ final class ReceiverController: ObservableObject {
     private var sleepActivity: NSObjectProtocol?
     private var screenObserver: NSObjectProtocol?
     private var screenSleepObservers: [NSObjectProtocol] = []
+    private let fullscreenPreference = FullscreenPreference()
+    private var windowObservers: [NSObjectProtocol] = []
+    private var windowCloseTimer: DispatchWorkItem?
 
     private var fallbackName: String { Host.current().localizedName ?? "Mac" }
 
@@ -44,15 +48,29 @@ final class ReceiverController: ObservableObject {
         // receive it as an H.264 capability and intersect it with their own
         // codec constraints. 4096x2304 is the practical H.264 hardware-decode
         // ceiling measured across Intel and Apple-silicon Macs, rather than an
-        // iMac-model exception. A 5K/6K panel keeps its full desktop geometry
-        // while the video is scaled. Revisit the envelope with the HEVC path.
+        // iMac-model exception.
+        //
+        // With a hardware HEVC decoder we also offer HEVC up to 5120x2880, so
+        // 4K and 5K panels can be sent 1:1 (the sender prefers HEVC). 5K is the
+        // largest raster measured live, on the oldest such Mac tested (a 2017
+        // Intel iMac); larger panels get a 5K stream scaled to fit.
+        //
+        // Both are landscape limits; `announcePanel` swaps them for a portrait
+        // panel (PROTOCOL.md 6.5), so a rotated 5K is not shrunk (#324).
         let receiver = StreamReceiver(displayLayer: AVSampleBufferDisplayLayer(),
                                       deviceKind: "Mac",
                                       fallbackServiceName: fallbackName,
-                                      maxEncodeWide: 4096, maxEncodeHigh: 2304)
+                                      maxEncodeWide: Self.h264Limit.width,
+                                      maxEncodeHigh: Self.h264Limit.height,
+                                      hevcCapability: Self.hevcLimit.map {
+                                          VideoCapability(codec: "hevc", maxWidth: $0.width,
+                                                          maxHeight: $0.height, maxFrameRate: 60)
+                                      })
         let saved = UserDefaults.standard.string(forKey: "receiverName")
         receiver.serviceName = (saved?.isEmpty == false) ? saved! : fallbackName
         announcePanel(to: receiver)
+        receiver.powerActions = PowerControl.supported
+        receiver.onPowerAction = { [weak self] action in self?.perform(action) }
         self.receiver = receiver
         receiver.start(port: 9000)
 
@@ -72,7 +90,7 @@ final class ReceiverController: ObservableObject {
             .sink { [weak self] streaming in
                 self?.streaming = streaming
                 self?.updateSleepAssertion(streaming)
-                if streaming { self?.showWindow() } else { self?.closeWindow() }
+                if streaming { self?.showWindow() } else { self?.scheduleCloseWindow() }
             }
             .store(in: &cancellables)
 
@@ -115,6 +133,8 @@ final class ReceiverController: ObservableObject {
     func stop(completion: (() -> Void)? = nil) {
         guard let receiver else { completion?(); return }
         cancellables.removeAll()
+        windowCloseTimer?.cancel()
+        windowCloseTimer = nil
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
         screenObserver = nil
         let workspace = NSWorkspace.shared.notificationCenter
@@ -127,6 +147,27 @@ final class ReceiverController: ObservableObject {
         closeWindow()
         updateSleepAssertion(false)
         Log.info("receiver mode stopped")
+    }
+
+    /// The sender asked this Mac to power off (PROTOCOL.md 6.6). Say
+    /// "closing" first, so the sender ends the session instead of redialing
+    /// a Mac that is going away.
+    private func perform(_ action: PowerAction) {
+        guard let receiver else { return }
+        Log.info("power \(action.rawValue): saying goodbye to the sender")
+        switch action {
+        case .shutdown:
+            receiver.shutDown {
+                DispatchQueue.main.async {
+                    PowerControl.perform(.shutdown)
+                    // An app with unsaved changes can cancel the shutdown:
+                    // take the listener back so this Mac is a display again.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+                        self?.receiver?.ensureListening()
+                    }
+                }
+            }
+        }
     }
 
     /// Re-published name from the panel's text field. Empty falls back to the
@@ -147,31 +188,83 @@ final class ReceiverController: ObservableObject {
     /// remote menu bar physically behind the notch; announcing the safe
     /// rect makes full screen exactly 1:1.
     ///
-    /// Non-Retina panels (scale 1, the legacy-Mac case): the sender always
-    /// builds an @2x HiDPI display of half the announced pixels, so
-    /// announcing the raw framebuffer would give a display with half the
-    /// points and comically large UI. Announce the panel's *point* size at
-    /// 2x instead: the sender's display then has the same point geometry as
-    /// the panel and the receiver scales the stream down 2:1 on the way in.
-    /// Costs encode bandwidth (the quality presets scale capture down
-    /// anyway), buys a correct-looking desktop.
+    /// Legacy fields (deprecated, read by older senders): the panel's
+    /// *point* size at 2x, so a non-Retina panel still gets its point
+    /// geometry from a sender that only builds 2x displays.
+    ///
+    /// `hello.panel` (PROTOCOL.md 6.7) carries the facts instead: physical
+    /// pixels of the native mode (minus the notch strip), the real backing
+    /// scale, and the current "looks like" size, from which the sender
+    /// decides the desktop (1x for a non-Retina panel, #344).
     private func announcePanel(to receiver: StreamReceiver) {
         guard let screen = NSScreen.screens.first else { return }
-        let scale = max(screen.backingScaleFactor, 2)
-        let height = screen.frame.height - screen.safeAreaInsets.top
-        if let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
-            as? CGDirectDisplayID,
-           let mode = CGDisplayCopyDisplayMode(number), mode.refreshRate > 0 {
+        let legacyScale = max(screen.backingScaleFactor, 2)
+        let inset = screen.safeAreaInsets.top
+        let height = screen.frame.height - inset
+        let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
+            as? CGDirectDisplayID
+        if let displayID, let mode = CGDisplayCopyDisplayMode(displayID), mode.refreshRate > 0 {
             receiver.setDisplayMaxFrameRate(Int(mode.refreshRate.rounded()))
         } else {
             receiver.setDisplayMaxFrameRate(60)
         }
-        if screen.backingScaleFactor < 2 {
-            Log.info("non-Retina panel (\(screen.backingScaleFactor)x) — announcing points at 2x")
+
+        let portrait = screen.frame.height > screen.frame.width
+        let native = displayID.flatMap(Self.nativePixels(of:))
+            ?? PanelSize(width: Int(screen.frame.width * screen.backingScaleFactor),
+                         height: Int(screen.frame.height * screen.backingScaleFactor))
+        // A rotated display reports a rotated frame; orient the native mode
+        // like it.
+        let long = max(native.width, native.height), short = min(native.width, native.height)
+        let nativeWide = portrait ? short : long
+        let nativeHigh = portrait ? long : short
+        let strip = screen.frame.height > 0
+            ? Int((inset * CGFloat(nativeHigh) / screen.frame.height).rounded()) : 0
+        let panel = PanelAnnouncement(pixelsWide: nativeWide, pixelsHigh: nativeHigh - strip,
+                                      scale: Double(screen.backingScaleFactor),
+                                      pointsWide: Int(screen.frame.width),
+                                      pointsHigh: Int(height))
+
+        func oriented(_ size: PanelSize) -> PanelSize {
+            portrait ? PanelSize(width: size.height, height: size.width) : size
         }
-        receiver.setPanel(pixelsWide: Int(screen.frame.width * scale),
-                          pixelsHigh: Int(height * scale),
-                          scale: Double(scale))
+        let h264 = oriented(Self.h264Limit)
+        let limitsChanged = receiver.setDecodeLimits(
+            maxEncodeWide: h264.width, maxEncodeHigh: h264.height,
+            hevc: Self.hevcLimit.map(oriented).map {
+                VideoCapability(codec: "hevc", maxWidth: $0.width, maxHeight: $0.height,
+                                maxFrameRate: 60)
+            })
+        receiver.setPanel(pixelsWide: Int(screen.frame.width * legacyScale),
+                          pixelsHigh: Int(height * legacyScale),
+                          scale: Double(legacyScale),
+                          panel: panel, limitsChanged: limitsChanged)
+    }
+
+    /// Landscape decode limits; see `start`.
+    private static let h264Limit = PanelSize(width: 4096, height: 2304)
+    private static let hevcLimit: PanelSize? = VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
+        ? PanelSize(width: 5120, height: 2880) : nil
+
+    /// The panel's physical pixels: its native mode, not the current mode,
+    /// whose pixel size is the backing store (6400x3600 at a scaled 5K mode).
+    private static func nativePixels(of display: CGDirectDisplayID) -> PanelSize? {
+        let opts = [kCGDisplayShowDuplicateLowResolutionModes: kCFBooleanTrue] as CFDictionary
+        guard let modes = CGDisplayCopyAllDisplayModes(display, opts) as? [CGDisplayMode],
+              !modes.isEmpty else { return nil }
+        // IOGraphicsTypes.h. Not every Mac sets the native flag (a 2017 iMac
+        // on macOS 13 does not), but the default mode always runs at the
+        // panel's pixels; failing both, the largest 1x mode is the panel.
+        let nativeFlag: UInt32 = 0x0200_0000   // kDisplayModeNativeFlag
+        let defaultFlag: UInt32 = 0x0000_0004  // kDisplayModeDefaultFlag
+        let byArea: (CGDisplayMode, CGDisplayMode) -> Bool = {
+            $0.pixelWidth * $0.pixelHeight < $1.pixelWidth * $1.pixelHeight
+        }
+        let mode = modes.first(where: { $0.ioFlags & nativeFlag != 0 })
+            ?? modes.first(where: { $0.ioFlags & defaultFlag != 0 })
+            ?? modes.filter({ $0.pixelWidth == $0.width }).max(by: byArea)
+            ?? modes.max(by: byArea)!
+        return PanelSize(width: mode.pixelWidth, height: mode.pixelHeight)
     }
 
     // MARK: - Video window
@@ -180,6 +273,9 @@ final class ReceiverController: ObservableObject {
     /// when the user closed the window while the stream keeps running.
     func showWindow() {
         guard let receiver, streaming || window != nil else { return }
+        windowCloseTimer?.cancel()
+        windowCloseTimer = nil
+        var created = false
         if window == nil {
             let w = NSWindow(contentRect: initialContentRect(video: receiver.videoSize),
                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -190,21 +286,73 @@ final class ReceiverController: ObservableObject {
             w.collectionBehavior.insert(.fullScreenPrimary)
             w.center()
             window = w
+            observeFullscreenChoice(of: w)
+            created = true
         }
         // Resizes keep the stream's shape; re-set on every show because a
         // reconnect can arrive with new dimensions in the same window.
         if receiver.videoSize != .zero { window?.contentAspectRatio = receiver.videoSize }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        // Only a freshly built window takes the preference: an existing one
+        // is already where the user put it, and toggling it mid-animation
+        // would undo the transition.
+        if created, fullscreenPreference.wantsFullscreen, let window {
+            window.toggleFullScreen(nil)
+        }
+    }
+
+    /// The stream stopped. A sender moving the session to a better transport
+    /// can drop the old link a moment before the new one is adopted, so wait
+    /// briefly before taking the window down: rebuilding it would replay the
+    /// fullscreen transition, and a toggle during the old window's animation
+    /// is refused.
+    private func scheduleCloseWindow() {
+        windowCloseTimer?.cancel()
+        let timer = DispatchWorkItem { [weak self] in self?.closeWindow() }
+        windowCloseTimer = timer
+        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(2), execute: timer)
     }
 
     private func closeWindow() {
+        windowCloseTimer?.cancel()
+        windowCloseTimer = nil
+        // Our own teardown is not the user's choice: stop listening first so
+        // closing a fullscreen window doesn't record "windowed".
+        stopObservingWindow()
         window?.close()
         window = nil
     }
 
-    /// Windowed at ~70% of the screen to start — the green button (native
-    /// full screen) is the "use the whole panel" gesture.
+    /// Remember the user's green-button choice for every future window. A
+    /// user close drops the window before its fullscreen exit is reported;
+    /// the panel's button then builds a fresh one with the preference.
+    private func observeFullscreenChoice(of window: NSWindow) {
+        let center = NotificationCenter.default
+        let observe = { (name: Notification.Name, apply: @escaping @MainActor (ReceiverController) -> Void) in
+            // Synchronous on .main: a close must stop observing before the
+            // fullscreen exit it causes is delivered.
+            center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { if let self { apply(self) } }
+            }
+        }
+        windowObservers = [
+            observe(NSWindow.didEnterFullScreenNotification) { $0.fullscreenPreference.wantsFullscreen = true },
+            observe(NSWindow.didExitFullScreenNotification) { $0.fullscreenPreference.wantsFullscreen = false },
+            observe(NSWindow.willCloseNotification) {
+                $0.stopObservingWindow()
+                $0.window = nil
+            },
+        ]
+    }
+
+    private func stopObservingWindow() {
+        windowObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        windowObservers = []
+    }
+
+    /// Windowed at ~70% of the screen; fullscreen returns here when the user
+    /// leaves it.
     private func initialContentRect(video: CGSize) -> NSRect {
         let visible = NSScreen.screens.first?.visibleFrame.size
             ?? CGSize(width: 1440, height: 900)
@@ -414,4 +562,9 @@ private final class OverlayHostingView: NSHostingView<ReceiverPerfOverlay> {
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: blankCursor)
     }
+}
+
+private struct PanelSize {
+    let width: Int
+    let height: Int
 }
