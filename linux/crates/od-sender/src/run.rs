@@ -12,7 +12,7 @@ use opendisplay_session::Now;
 use opendisplay_session::sender::{SenderAction, SenderConfig, SenderEvent, SenderSession};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tracing::{debug, info, warn};
 
 use crate::capture::{self, FrameInfo};
@@ -46,6 +46,9 @@ struct RawFrame {
 struct Display {
     name: String,
     stop: Arc<AtomicBool>,
+    capture: Option<std::thread::JoinHandle<()>>,
+    /// Held for the display's lifetime; see [`lock_output`].
+    _lock: std::fs::File,
     force_idr: Arc<AtomicBool>,
     encoded_rx: mpsc::Receiver<Encoded>,
     hello: Hello,
@@ -71,6 +74,7 @@ fn short_id(hello: &Hello) -> String {
 impl Display {
     fn create(ipc: &HyprlandIpc, hello: &Hello, opts: &RunOptions) -> Result<Display> {
         let name = format!("od-{}", short_id(hello));
+        let lock = lock_output(&name)?;
         let hz = hello.display_max_frame_rate.unwrap_or(60).clamp(30, 240);
         let scale = if hello.scale >= 1.0 { hello.scale } else { 1.0 };
         if ipc.monitor(&name)?.is_none() {
@@ -110,7 +114,7 @@ impl Display {
         let cap_stop = stop.clone();
         let cap_name = name.clone();
         let cursor = opts.cursor_in_video;
-        std::thread::Builder::new()
+        let capture = std::thread::Builder::new()
             .name("capture".into())
             .spawn(move || {
                 let r = capture::capture_shm(
@@ -146,26 +150,38 @@ impl Display {
             .spawn(move || {
                 let mut encoder: Option<Encoder> = None;
                 let mut last: Option<RawFrame> = None;
+                // Newest captured frame not yet encoded. A frame that arrives
+                // inside the rate cap waits here for its slot rather than
+                // being dropped: on a screen that then goes static it is the
+                // last picture, and no further damage would ever replace it.
+                let mut pending: Option<RawFrame> = None;
                 let min_interval = Duration::from_secs_f32(1.0 / settings.max_fps.max(1.0));
-                let mut last_sent = Instant::now() - min_interval;
+                // The cap is measured between encode starts, so encode time
+                // counts towards the interval instead of adding to it.
+                let mut last_start = Instant::now() - min_interval;
                 while !enc_stop.load(Ordering::Relaxed) {
-                    let (frame, replay) = match raw_rx.recv_timeout(Duration::from_millis(100)) {
-                        Ok(f) => (Some(f), false),
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                            if enc_force.load(Ordering::Relaxed) && last.is_some() {
-                                (last.take(), true)
-                            } else {
-                                continue;
-                            }
-                        }
-                        Err(_) => break,
+                    let timeout = if pending.is_some() {
+                        min_interval.saturating_sub(last_start.elapsed())
+                    } else {
+                        Duration::from_millis(100)
                     };
-                    let Some(frame) = frame else { continue };
-                    if !replay && last_sent.elapsed() < min_interval {
-                        // Rate cap: keep the newest frame for a possible replay, skip encoding it.
-                        last = Some(frame);
-                        continue;
+                    match raw_rx.recv_timeout(timeout) {
+                        Ok(f) => pending = Some(f),
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(_) => break,
                     }
+                    let frame = if pending.is_some() {
+                        if last_start.elapsed() < min_interval {
+                            continue;
+                        }
+                        pending.take().unwrap()
+                    } else if enc_force.load(Ordering::Relaxed) && last.is_some() {
+                        // Static screen and an IDR was asked for: replay (§5.3).
+                        last.take().unwrap()
+                    } else {
+                        continue;
+                    };
+                    last_start = Instant::now();
                     let (w, h) = (frame.info.width, frame.info.height);
                     if encoder
                         .as_ref()
@@ -204,9 +220,6 @@ impl Display {
                                 warn!("encoder ignored the IDR request");
                                 enc_force.store(true, Ordering::Relaxed);
                             }
-                            if !units.is_empty() {
-                                last_sent = Instant::now();
-                            }
                             if units
                                 .into_iter()
                                 .any(|enc| encoded_tx.blocking_send(enc).is_err())
@@ -231,6 +244,8 @@ impl Display {
         Ok(Display {
             name,
             stop,
+            capture: Some(capture),
+            _lock: lock,
             force_idr,
             encoded_rx,
             hello: hello.clone(),
@@ -238,24 +253,93 @@ impl Display {
         })
     }
 
-    fn stop(&self) {
+    /// Stop the threads and wait for capture to end. The capture session
+    /// must be gone before the output is reconfigured or removed: Hyprland
+    /// 0.56.2 aborts in `CScreenshareFrame::transform` when a monitor changes
+    /// under a frame in flight.
+    fn stop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        if let Some(h) = self.capture.take() {
+            let _ = h.join();
+        }
     }
+}
+
+/// One sender per virtual output. A second sender for the same receiver would
+/// adopt and reconfigure an output the first is still capturing, which takes
+/// Hyprland down (see [`Display::stop`]). The lock is released when the file
+/// closes, including on a crash.
+fn lock_output(name: &str) -> Result<std::fs::File> {
+    let dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("opendisplay");
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let path = dir.join(format!("{name}.lock"));
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .with_context(|| format!("opening {}", path.display()))?;
+    use std::os::fd::AsRawFd;
+    const LOCK_EX: i32 = 2;
+    const LOCK_NB: i32 = 4;
+    // SAFETY: flock on a descriptor we own for the duration of the call.
+    if unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) } == 0 {
+        return Ok(file);
+    }
+    let e = std::io::Error::last_os_error();
+    if e.kind() == std::io::ErrorKind::WouldBlock {
+        anyhow::bail!(
+            "another od-sender is already driving {name} ({})",
+            path.display()
+        );
+    }
+    Err(e).with_context(|| format!("locking {}", path.display()))
+}
+
+unsafe extern "C" {
+    fn flock(fd: i32, operation: i32) -> i32;
+}
+
+/// Resolves to `true` on SIGINT or SIGTERM. Handled explicitly so the output
+/// is torn down in order, and because a sender started in the background by
+/// a non-interactive shell inherits SIGINT as ignored.
+fn shutdown_signal() -> Result<watch::Receiver<bool>> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let (tx, rx) = watch::channel(false);
+    let mut int = signal(SignalKind::interrupt())?;
+    let mut term = signal(SignalKind::terminate())?;
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = int.recv() => {}
+            _ = term.recv() => {}
+        }
+        info!("shutting down");
+        let _ = tx.send(true);
+    });
+    Ok(rx)
 }
 
 pub async fn run(addr: SocketAddr, opts: RunOptions) -> Result<()> {
     let start = Instant::now();
     let ipc = HyprlandIpc::from_env()?;
     info!("{}", ipc.version()?);
+    let mut shutdown = shutdown_signal()?;
     loop {
-        if opts.duration.is_some_and(|d| start.elapsed() >= d) {
+        if *shutdown.borrow() || opts.duration.is_some_and(|d| start.elapsed() >= d) {
             break;
         }
-        match TcpStream::connect(addr).await {
+        let dialed = tokio::select! {
+            r = TcpStream::connect(addr) => r,
+            _ = shutdown.changed() => break,
+        };
+        match dialed {
             Ok(stream) => {
                 let _ = stream.set_nodelay(true);
                 info!("connected to receiver {addr}");
-                match session(stream, &ipc, &opts, start).await {
+                match session(stream, &ipc, &opts, start, shutdown.clone()).await {
                     Ok(true) => {
                         info!("receiver closed the session for good");
                         break;
@@ -266,10 +350,13 @@ pub async fn run(addr: SocketAddr, opts: RunOptions) -> Result<()> {
             }
             Err(e) => warn!("dial {addr}: {e}"),
         }
-        if !opts.reconnect {
+        if !opts.reconnect || *shutdown.borrow() {
             break;
         }
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+            _ = shutdown.changed() => break,
+        }
     }
     Ok(())
 }
@@ -280,6 +367,7 @@ async fn session(
     ipc: &HyprlandIpc,
     opts: &RunOptions,
     start: Instant,
+    mut shutdown: watch::Receiver<bool>,
 ) -> Result<bool> {
     let mut sess = SenderSession::new(SenderConfig::default());
     sess.handle(now(start), SenderEvent::Connected);
@@ -295,6 +383,7 @@ async fn session(
     let result: Result<()> = async {
         loop {
             let actions: Vec<SenderAction> = tokio::select! {
+                _ = shutdown.changed() => return Ok(()),
                 r = stream.read(&mut buf) => {
                     let n = r.context("read")?;
                     if n == 0 { return Ok(()); }
@@ -341,7 +430,7 @@ async fn session(
                         );
                         let rebuild = display.as_ref().is_none_or(|d| d.hello.pixels_wide != h.pixels_wide || d.hello.pixels_high != h.pixels_high || d.hello.scale != h.scale);
                         if rebuild {
-                            if let Some(d) = display.take() {
+                            if let Some(mut d) = display.take() {
                                 d.stop();
                             }
                             display = Some(Display::create(ipc, &h, opts)?);
@@ -394,7 +483,7 @@ async fn session(
     }
     .await;
 
-    if let Some(d) = display.take() {
+    if let Some(mut d) = display.take() {
         d.stop();
         if !opts.keep_output {
             match ipc.remove_output(&d.name) {
@@ -410,5 +499,20 @@ async fn recv_encoded(display: &mut Option<Display>) -> Option<Encoded> {
     match display {
         Some(d) => d.encoded_rx.recv().await,
         None => std::future::pending().await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lock_output;
+
+    #[test]
+    fn second_sender_for_the_same_output_is_refused() {
+        let name = format!("od-test-{}", std::process::id());
+        let first = lock_output(&name).expect("first lock");
+        let err = lock_output(&name).expect_err("second lock must fail");
+        assert!(err.to_string().contains("already driving"), "{err:#}");
+        drop(first);
+        lock_output(&name).expect("lock is free again once the holder closes");
     }
 }

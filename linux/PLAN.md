@@ -344,6 +344,20 @@ port 5353 ever misbehaves.
    ≈ 62 ms. That is 3–8× slower than x264 `ultrafast` (§2.4), so OpenH264 is
    the zero-dependency floor only; the real software tier should be x264
    (`x264enc` via GStreamer or libx264 directly) and the real path VA-API.*
+   *Status 2026-10-06 (M1 Pro, Asahi, Hyprland 0.56.2 → iPhone over Wi-Fi):
+   first real iOS session works, portrait and landscape. Encoding is
+   `--encoder auto|v4l2m2m|x264|openh264` through the system FFmpeg
+   (`ffmpeg-next`): auto tries `h264_v4l2m2m` (any V4L2 stateful encoder,
+   Asahi AVE once it ships, #360), then libx264 `superfast`/`zerolatency`,
+   then the bundled OpenH264. Live, x264 cut phone-measured e2e p50 from
+   39 ms to 30 ms. A rate-cap bug held full-motion content at 20 fps
+   (frames inside the cap were dropped, timed from encode end); fixed, not
+   yet re-measured. Hyprland 0.56.2 aborts in
+   `CScreenshareFrame::transform` when an output is reconfigured under an
+   active capture, so teardown now joins the capture thread before touching
+   the output, and a per-output lock keeps a second sender off it.
+   Not done: VA-API backend (Intel box), BGRA→I420 off the CPU (~5 ms at
+   2556×1178), `hello.panel` sizing.*
 4. **Latency and polish.** UDP cursor side channel + `cursorAck`, `stats`
    with `e2e50/95` from the telemetry prefix + clock offset, `wp_presentation`
    based present timing, `streamConfig`/`videoCaps` intersection, adaptive
