@@ -34,6 +34,9 @@ enum Cmd {
         bitrate_mbps: f32,
         #[arg(long, default_value_t = 60.0)]
         max_fps: f32,
+        /// H.264 encoder backend (#360).
+        #[arg(long, value_enum, default_value_t = encoder::Backend::Auto)]
+        encoder: encoder::Backend,
         /// Encoder threads (0 = all cores).
         #[arg(long, default_value_t = 0)]
         threads: u16,
@@ -81,6 +84,9 @@ enum Cmd {
         threads: u16,
         #[arg(long, default_value_t = 20.0)]
         bitrate_mbps: f32,
+        /// H.264 encoder backend (#360).
+        #[arg(long, value_enum, default_value_t = encoder::Backend::Auto)]
+        encoder: encoder::Backend,
     },
     /// Create a headless output, move the pointer onto it via the virtual
     /// pointer protocol and verify the position through Hyprland IPC.
@@ -120,6 +126,7 @@ async fn main() -> Result<()> {
             bitrate_mbps,
             max_fps,
             threads,
+            encoder,
             no_cursor,
             position,
             keep_output,
@@ -150,6 +157,7 @@ async fn main() -> Result<()> {
                     bitrate_mbps,
                     max_fps,
                     threads,
+                    encoder,
                     cursor_in_video: !no_cursor,
                     position,
                     keep_output,
@@ -165,6 +173,7 @@ async fn main() -> Result<()> {
             frames,
             threads,
             bitrate_mbps,
+            encoder: backend,
         } => {
             let threads = if threads == 0 {
                 std::thread::available_parallelism()
@@ -177,6 +186,7 @@ async fn main() -> Result<()> {
                 width,
                 height,
                 encoder::EncoderSettings {
+                    backend,
                     bitrate_bps: (bitrate_mbps * 1e6) as u32,
                     max_fps: 60.0,
                     threads,
@@ -199,7 +209,7 @@ async fn main() -> Result<()> {
                     }
                 }
                 let t = Instant::now();
-                if let Some(e) = enc.encode(&frame, stride, i == 0, t)? {
+                for e in enc.encode(&frame, stride, i == 0, t)? {
                     bytes += e.unit.annexb.len();
                 }
                 times.push(t.elapsed().as_secs_f64() * 1000.0);
@@ -207,7 +217,8 @@ async fn main() -> Result<()> {
             times.sort_by(f64::total_cmp);
             let n = times.len();
             info!(
-                "{width}x{height} {threads} threads: encode p50 {:.1} ms, p95 {:.1} ms, max {:.1} ms -> {:.0} fps sustainable; avg frame {:.0} KB",
+                "{} {width}x{height} {threads} threads: encode p50 {:.1} ms, p95 {:.1} ms, max {:.1} ms -> {:.0} fps sustainable; avg frame {:.0} KB",
+                enc.label(),
                 times[n / 2],
                 times[(n as f64 * 0.95) as usize],
                 times[n - 1],

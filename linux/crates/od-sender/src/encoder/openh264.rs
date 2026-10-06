@@ -1,11 +1,10 @@
-//! Software H.264 encoding with OpenH264 — the fallback tier that works on
-//! every machine (Asahi, VMs, boxes without VA-API). Hardware encoders land
-//! behind the same [`Encoder`] shape after Spike 0.
+//! OpenH264, compiled in: the last-resort tier that works on every machine,
+//! including ones whose FFmpeg lacks libx264.
 
 use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow};
-use opendisplay_proto::video::{AccessUnit, access_units};
+use opendisplay_proto::video::access_units;
 use openh264::OpenH264API;
 use openh264::encoder::{
     BitRate, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, RateControlMode,
@@ -13,33 +12,18 @@ use openh264::encoder::{
 };
 use openh264::formats::{BgraSliceU8, YUVBuffer};
 
-#[derive(Debug, Clone, Copy)]
-pub struct EncoderSettings {
-    pub bitrate_bps: u32,
-    pub max_fps: f32,
-    pub threads: u16,
-}
+use super::{Encoded, EncoderSettings};
 
-pub struct Encoder {
+pub struct OpenH264Encoder {
     inner: openh264::encoder::Encoder,
     width: u32,
     height: u32,
     packed: Vec<u8>,
-    pub frames: u64,
-    pub last_encode_ms: f64,
 }
 
-/// One encoded picture ready for the wire.
-pub struct Encoded {
-    pub unit: AccessUnit,
-    pub captured_at: Instant,
-    pub encode_ms: f64,
-}
-
-impl Encoder {
+impl OpenH264Encoder {
+    /// `width`/`height` are already even.
     pub fn new(width: u32, height: u32, s: EncoderSettings) -> Result<Self> {
-        // I420 needs even dimensions; drop a row/column if the panel is odd.
-        let (width, height) = (width & !1, height & !1);
         let cfg = EncoderConfig::new()
             .usage_type(UsageType::ScreenContentRealTime)
             .rate_control_mode(RateControlMode::Bitrate)
@@ -61,24 +45,16 @@ impl Encoder {
             width,
             height,
             packed: Vec::new(),
-            frames: 0,
-            last_encode_ms: 0.0,
         })
     }
 
-    pub fn dimensions(&self) -> (u32, u32) {
-        (self.width, self.height)
-    }
-
-    /// Encode one BGRX/BGRA frame (`stride` bytes per row). `None` when the
-    /// encoder skipped the frame.
     pub fn encode(
         &mut self,
         bgra: &[u8],
         stride: u32,
         force_idr: bool,
         captured_at: Instant,
-    ) -> Result<Option<Encoded>> {
+    ) -> Result<Vec<Encoded>> {
         let t0 = Instant::now();
         let row = (self.width * 4) as usize;
         let src: &[u8] = if stride as usize == row {
@@ -103,18 +79,15 @@ impl Encoder {
             .encode(&yuv)
             .map_err(|e| anyhow!("encode: {e}"))?;
         if matches!(bs.frame_type(), FrameType::Skip | FrameType::Invalid) {
-            return Ok(None);
+            return Ok(Vec::new());
         }
         let raw = bs.to_vec();
         let mut units = access_units(&raw);
         let unit = units.pop().context("encoder produced no access unit")?;
-        let encode_ms = t0.elapsed().as_secs_f64() * 1000.0;
-        self.frames += 1;
-        self.last_encode_ms = encode_ms;
-        Ok(Some(Encoded {
+        Ok(vec![Encoded {
             unit,
             captured_at,
-            encode_ms,
-        }))
+            encode_ms: t0.elapsed().as_secs_f64() * 1000.0,
+        }])
     }
 }

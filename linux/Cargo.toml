@@ -35,6 +35,8 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 gstreamer = "0.25"
 gstreamer-app = "0.25"
 openh264 = { version = "0.9", features = ["source"] }
+# Encoder + swscale only; ffmpeg-next needs `format` to compile, never used.
+ffmpeg-next = { version = "9", default-features = false, features = ["codec", "format", "software-scaling"] }
 
 # OpenH264 is C++ compiled by `cc` at the profile's opt-level; at -O0 it is
 # ~10x slower than release, which makes debug-build sender tests misleading.

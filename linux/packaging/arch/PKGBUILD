@@ -23,13 +23,14 @@ depends=(
   'gst-plugins-bad'
   'gst-libav'                 # avdec_h264: software decode everywhere
   'wayland'
+  'ffmpeg'                    # od-sender: libx264 and V4L2 M2M encoders, swscale
 )
 optdepends=(
   'gst-plugin-va: hardware H.264 decode/encode via VA-API (Intel/AMD)'
   'libva-utils: vainfo for diagnosing the VA-API path'
   'gst-plugin-pipewire: portal-based capture on non-wlroots compositors (future)'
 )
-makedepends=('cargo' 'pkgconf' 'gcc')
+makedepends=('cargo' 'pkgconf' 'gcc' 'clang')  # clang: bindgen for ffmpeg-sys-next
 options=('!lto')  # cargo profile handles LTO
 
 # Built from the enclosing git checkout; the AUR package pins a release tarball.

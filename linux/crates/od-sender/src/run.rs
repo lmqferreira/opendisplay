@@ -25,6 +25,7 @@ pub struct RunOptions {
     pub bitrate_mbps: f32,
     pub max_fps: f32,
     pub threads: u16,
+    pub encoder: crate::encoder::Backend,
     /// Bake the cursor into the video (receivers without cursor rendering).
     pub cursor_in_video: bool,
     /// Hyprland position spec for the virtual output.
@@ -134,7 +135,8 @@ impl Display {
         // requested and the screen is static (§5.3).
         let enc_stop = stop.clone();
         let enc_force = force_idr.clone();
-        let settings = EncoderSettings {
+        let mut settings = EncoderSettings {
+            backend: opts.encoder,
             bitrate_bps: (opts.bitrate_mbps * 1e6) as u32,
             max_fps: opts.max_fps,
             threads: opts.threads,
@@ -172,12 +174,15 @@ impl Display {
                         match Encoder::new(w, h, settings) {
                             Ok(e) => {
                                 info!(
-                                    "encoder: OpenH264 {}x{} {:.1} Mbit/s, {} threads",
+                                    "encoder: {} {}x{} {:.1} Mbit/s, {} threads",
+                                    e.label(),
                                     w & !1,
                                     h & !1,
                                     settings.bitrate_bps as f64 / 1e6,
                                     settings.threads
                                 );
+                                // A resize reopens the same backend without probing.
+                                settings.backend = e.backend();
                                 encoder = Some(e);
                                 enc_force.store(true, Ordering::Relaxed);
                             }
@@ -194,17 +199,21 @@ impl Display {
                         force,
                         frame.captured_at,
                     ) {
-                        Ok(Some(enc)) => {
-                            if force && !enc.unit.is_idr {
+                        Ok(units) => {
+                            if force && !units.iter().any(|u| u.unit.is_idr) {
                                 warn!("encoder ignored the IDR request");
                                 enc_force.store(true, Ordering::Relaxed);
                             }
-                            last_sent = Instant::now();
-                            if encoded_tx.blocking_send(enc).is_err() {
+                            if !units.is_empty() {
+                                last_sent = Instant::now();
+                            }
+                            if units
+                                .into_iter()
+                                .any(|enc| encoded_tx.blocking_send(enc).is_err())
+                            {
                                 break;
                             }
                         }
-                        Ok(None) => {}
                         Err(e) => warn!("encode failed: {e:#}"),
                     }
                     last = Some(frame);
