@@ -32,8 +32,10 @@ enum Cmd {
         name: Option<String>,
         #[arg(long, default_value_t = 20.0)]
         bitrate_mbps: f32,
-        #[arg(long, default_value_t = 60.0)]
-        max_fps: f32,
+        /// Frame-rate cap; default: the receiver's `displayMaxFrameRate`
+        /// (120 on ProMotion), never above it.
+        #[arg(long)]
+        max_fps: Option<f32>,
         /// H.264 encoder backend (#360).
         #[arg(long, value_enum, default_value_t = encoder::Backend::Auto)]
         encoder: encoder::Backend,

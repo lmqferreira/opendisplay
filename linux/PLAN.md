@@ -356,8 +356,18 @@ port 5353 ever misbehaves.
    `CScreenshareFrame::transform` when an output is reconfigured under an
    active capture, so teardown now joins the capture thread before touching
    the output, and a per-output lock keeps a second sender off it.
+   Rate-cap fix verified: full motion holds 59 fps at a 60 cap; the cap
+   now defaults to `displayMaxFrameRate` (iPhone 120 → ~72 fps delivered,
+   e2e p50 19–21 ms). **Open:** the Intel iMac's Mac receiver at 4096×2304
+   reports e2e p50 ≈ 220 ms with rtt 5 ms and an empty sender Send-Q; e2e is
+   measured on arrival, before decode, and is stable rather than growing.
+   Either a fixed delay in the Mac receiver's read path or a skewed clock
+   offset there; check felt lag and the receiver log on the iMac.
    Not done: VA-API backend (Intel box), BGRA→I420 off the CPU (~5 ms at
-   2556×1178), `hello.panel` sizing.*
+   2556×1178), overlapping capture/convert with encode, cursor side
+   channel, `hello.panel` / `maxEncodeWide` sizing, and a sender option
+   for which workspace lands on the virtual output (today Hyprland gives it
+   the next free one, which is fine for now).*
 4. **Latency and polish.** UDP cursor side channel + `cursorAck`, `stats`
    with `e2e50/95` from the telemetry prefix + clock offset, `wp_presentation`
    based present timing, `streamConfig`/`videoCaps` intersection, adaptive

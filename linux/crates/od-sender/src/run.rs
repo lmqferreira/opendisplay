@@ -23,7 +23,8 @@ use crate::input::{InputCmd, InputInjector};
 #[derive(Debug, Clone)]
 pub struct RunOptions {
     pub bitrate_mbps: f32,
-    pub max_fps: f32,
+    /// `None`: follow the receiver's `displayMaxFrameRate`.
+    pub max_fps: Option<f32>,
     pub threads: u16,
     pub encoder: crate::encoder::Backend,
     /// Bake the cursor into the video (receivers without cursor rendering).
@@ -69,6 +70,15 @@ fn short_id(hello: &Hello) -> String {
         .as_deref()
         .map(|s| s.chars().take(6).collect::<String>().to_lowercase())
         .unwrap_or_else(|| "anon".into())
+}
+
+/// The submission-rate ceiling: the receiver's panel rate, lowered by
+/// `--max-fps`. A 120 Hz panel fed 60 fps waits up to a whole extra
+/// interval per frame, which is felt most in pointer motion.
+fn stream_fps(opts: &RunOptions, hello: &Hello) -> u32 {
+    let panel = hello.display_max_frame_rate.unwrap_or(60).clamp(30, 240);
+    opts.max_fps
+        .map_or(panel, |cap| (cap.round().max(1.0) as u32).min(panel))
 }
 
 impl Display {
@@ -142,7 +152,7 @@ impl Display {
         let mut settings = EncoderSettings {
             backend: opts.encoder,
             bitrate_bps: (opts.bitrate_mbps * 1e6) as u32,
-            max_fps: opts.max_fps,
+            max_fps: stream_fps(opts, hello) as f32,
             threads: opts.threads,
         };
         std::thread::Builder::new()
@@ -438,7 +448,7 @@ async fn session(
                                 codec: "h264".into(),
                                 width: h.pixels_wide & !1,
                                 height: h.pixels_high & !1,
-                                frames_per_second: (opts.max_fps.round() as u32).min(h.display_max_frame_rate.unwrap_or(60)),
+                                frames_per_second: stream_fps(opts, &h),
                             });
                             if let SenderAction::Send(b) = cfg {
                                 stream.write_all(&b).await.context("write")?;
