@@ -141,6 +141,19 @@ adapters.
 iPad is the same codebase. iPad-specific polish (Pencil, pressure) is on the
 roadmap.
 
+**The pointer on my device is too small.**
+In the Mac sender's device row, click the **cursor arrow** button and adjust
+**Cursor size** from 100% to 400%. It updates live without restarting video,
+keeps the low-latency local cursor, and does not change macOS's global pointer
+size. The choice is remembered per receiver across reconnects, USB/WiFi changes,
+and rotation; 100% preserves the original size.
+
+This control needs the default `localCursor` mode. If you previously enabled
+the captured-system-cursor workaround, restore local rendering with
+`defaults write com.peetzweg.opensidecar.mac localCursor -bool true` and quit
+and reopen the sender. The size control does not affect a cursor baked into
+the video. Existing iPad/iPhone/Mac receiver apps work without an update.
+
 **Can another Mac be the display?** Yes. Install **OpenDisplay Receiver**
 (a separate, small app from the same release) on the spare Mac. It only needs
 **macOS 12 Monterey** or newer, so Macs from around 2015 onward qualify even

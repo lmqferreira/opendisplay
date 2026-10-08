@@ -156,13 +156,17 @@ final class DeviceSession: ObservableObject, Identifiable {
 
     // The Display size control (extend only): the choice for this device
     // and what each choice gives on it, from the latest hello.
-    private var lastHello: PhoneInfo?
+    @Published private var lastHello: PhoneInfo?
     @Published private(set) var displaySize: DisplaySize = .default
     @Published private(set) var displaySizeOutcomes: [DisplaySizeOutcome] = []
+    @Published private(set) var cursorSize = CursorSizing.defaultScale
+
+    var canChooseCursorSize: Bool { lastHello != nil }
 
     func helloArrived(_ info: PhoneInfo) {
         lastHello = info
         refreshDisplaySize()
+        refreshCursorSize()
     }
 
     func setDisplaySize(_ size: DisplaySize) {
@@ -178,6 +182,17 @@ final class DeviceSession: ObservableObject, Identifiable {
         displaySize = DisplaySizeStore.load(key: sender.displaySizeKey(for: info))
         let outcomes = sender.displaySizeOutcomes(for: info)
         if outcomes != displaySizeOutcomes { displaySizeOutcomes = outcomes }
+    }
+
+    func setCursorSize(_ scale: Double) {
+        guard let info = lastHello else { return }
+        sender.setCursorSize(scale, for: info)
+        refreshCursorSize()
+    }
+
+    func refreshCursorSize() {
+        guard let info = lastHello else { return }
+        cursorSize = sender.cursorSize(for: info)
     }
 
     init(id: String, target: ConnectionTarget, name: String, sender: MacSender) {
@@ -1120,6 +1135,7 @@ struct SessionRow: View {
     let controller: SenderController
     @State private var confirmingShutdown = false
     @State private var choosingDisplaySize = false
+    @State private var choosingCursorSize = false
 
     private var statusColor: Color {
         if session.status.hasPrefix("Extending") || session.status.hasPrefix("Mirroring")
@@ -1178,9 +1194,57 @@ struct SessionRow: View {
                     DisplaySizePicker(session: session)
                 }
             }
+            if session.canChooseCursorSize {
+                Button {
+                    choosingCursorSize = true
+                } label: {
+                    Image(systemName: "cursorarrow")
+                }
+                .controlSize(.small)
+                .help("Cursor size of \(title)")
+                .popover(isPresented: $choosingCursorSize, arrowEdge: .bottom) {
+                    CursorSizePicker(session: session)
+                }
+            }
             Button("Disconnect") { controller.disconnect(session) }
                 .controlSize(.small)
         }
+    }
+}
+
+@MainActor
+struct CursorSizePicker: View {
+    @ObservedObject var session: DeviceSession
+
+    private var percentage: String { String(format: "%.0f%%", session.cursorSize * 100) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Cursor size").font(.headline)
+            HStack {
+                Slider(value: Binding(
+                    get: { session.cursorSize },
+                    set: { session.setCursorSize($0) }),
+                       in: CursorSizing.scaleRange, step: 0.05)
+                    .accessibilityLabel("Cursor size")
+                    .accessibilityValue(percentage)
+                Text(percentage)
+                    .monospacedDigit()
+                    .frame(width: 44, alignment: .trailing)
+            }
+            .disabled(!session.sender.usesLocalCursor)
+            Button("Reset to 100%") { session.setCursorSize(CursorSizing.defaultScale) }
+                .disabled(!session.sender.usesLocalCursor
+                          || session.cursorSize == CursorSizing.defaultScale)
+            Text(session.sender.usesLocalCursor
+                 ? "Changes only this device's cursor, without restarting video or changing macOS pointer settings."
+                 : "The cursor is captured in the video. Enable the localCursor preference and restart OpenDisplay to use this control.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .frame(width: 280)
+        .onAppear { session.refreshCursorSize() }
     }
 }
 
@@ -1221,4 +1285,3 @@ struct DisplaySizePicker: View {
         return outcome.caption + (sameAsDefault ? " (same as Default)" : "")
     }
 }
-

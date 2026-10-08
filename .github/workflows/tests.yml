@@ -21,9 +21,9 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      # Deliberately without DEVELOPMENT_TEAM: nothing built here is
-      # distributed, so an unsigned build is enough, and needing no secrets
-      # means this check also runs on pull requests from forks.
+      # Deliberately without DEVELOPMENT_TEAM: these are unsigned development
+      # builds, not releases. Needing no secrets means this check also runs
+      # on pull requests from forks.
       - name: Generate project
         run: xcodegen generate
 
@@ -35,9 +35,23 @@ jobs:
             -project OpenSidecar.xcodeproj \
             -scheme OpenSidecarMac \
             -destination 'platform=macOS' \
+            -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
+
+      - name: Package development sender
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            "build/Build/Products/Debug/OpenDisplay Dev.app" \
+            build/OpenDisplay-Dev.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenDisplay-Dev-${{ github.sha }}
+          path: build/OpenDisplay-Dev.zip
+          if-no-files-found: error
+          retention-days: 7
 
       # The receiver app has a much lower deployment target than the sender
       # (issue #241); building it is what catches an API that only exists on
