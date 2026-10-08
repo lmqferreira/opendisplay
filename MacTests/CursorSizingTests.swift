@@ -70,12 +70,13 @@ final class CursorSizingTests: XCTestCase {
             XCTAssertThrowsError(try geometry(scale: scale))
         }
         for invalid in [CGSize.zero, CGSize(width: -1, height: 1),
-                        CGSize(width: .infinity, height: 1), CGSize(width: 1, height: .nan)] {
+                        CGSize(width: CGFloat.infinity, height: 1),
+                        CGSize(width: 1, height: CGFloat.nan)] {
             XCTAssertThrowsError(try CursorSpriteGeometry(
                 imageSize: invalid, hotspot: hotspot, displaySize: display, scale: 1))
             XCTAssertThrowsError(try geometry(display: invalid))
         }
-        XCTAssertThrowsError(try geometry(hotspot: CGPoint(x: .nan, y: 0)))
+        XCTAssertThrowsError(try geometry(hotspot: CGPoint(x: CGFloat.nan, y: 0)))
         XCTAssertThrowsError(try CursorSpriteGeometry(
             imageSize: CGSize(width: 0.01, height: 32),
             hotspot: CGPoint(x: CGFloat.greatestFiniteMagnitude, y: 0),
