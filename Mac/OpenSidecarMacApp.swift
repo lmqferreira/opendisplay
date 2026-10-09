@@ -156,13 +156,21 @@ final class DeviceSession: ObservableObject, Identifiable {
 
     // The Display size control (extend only): the choice for this device
     // and what each choice gives on it, from the latest hello.
-    private var lastHello: PhoneInfo?
+    @Published private var lastHello: PhoneInfo?
     @Published private(set) var displaySize: DisplaySize = .default
     @Published private(set) var displaySizeOutcomes: [DisplaySizeOutcome] = []
+    @Published private(set) var cursorSize = CursorSizing.defaultScale
+    @Published private(set) var cursorSuggestion: CursorSuggestionState = .unavailable(.identifyingDevice)
+    private var receiverModel: String?
+
+    var canChooseCursorSize: Bool { lastHello != nil }
 
     func helloArrived(_ info: PhoneInfo) {
+        if lastHello?.id != info.id { receiverModel = nil }
         lastHello = info
         refreshDisplaySize()
+        refreshCursorSize()
+        refreshCursorSuggestion()
     }
 
     func setDisplaySize(_ size: DisplaySize) {
@@ -178,6 +186,85 @@ final class DeviceSession: ObservableObject, Identifiable {
         displaySize = DisplaySizeStore.load(key: sender.displaySizeKey(for: info))
         let outcomes = sender.displaySizeOutcomes(for: info)
         if outcomes != displaySizeOutcomes { displaySizeOutcomes = outcomes }
+    }
+
+    func setCursorSize(_ scale: Double) {
+        guard let info = lastHello else { return }
+        sender.setCursorSize(scale, for: info)
+        refreshCursorSize()
+    }
+
+    func refreshCursorSize() {
+        guard let info = lastHello else { return }
+        cursorSize = sender.cursorSize(for: info)
+    }
+
+    func acceptProductType(_ model: String) {
+        guard let info = lastHello, info.kind == "iPad", let id = info.id, !id.isEmpty,
+              model.hasPrefix("iPad"), model.contains(",") else { return }
+        if receiverModel != model {
+            receiverModel = model
+            CursorDeviceModelStore.save(model, receiverID: id)
+        }
+        refreshCursorSuggestion()
+    }
+
+    func useSuggestedCursorSize() {
+        guard case .available(let suggestion) = cursorSuggestion else { return }
+        setCursorSize(suggestion.scale)
+    }
+
+    func refreshCursorSuggestion() {
+        guard let info = lastHello else { return }
+        guard sender.usesLocalCursor else {
+            cursorSuggestion = .unavailable(.capturedCursor)
+            return
+        }
+        guard sender.cursorSuggestionSupportsMode else {
+            cursorSuggestion = .unavailable(.mirrorMode)
+            return
+        }
+        guard info.kind == "iPad" else {
+            cursorSuggestion = .unavailable(.unknownModel)
+            return
+        }
+        guard let id = info.id, !id.isEmpty else {
+            cursorSuggestion = .unavailable(.receiverIdentity)
+            return
+        }
+        if receiverModel == nil {
+            do {
+                receiverModel = try CursorDeviceModelStore.load(receiverID: id)
+            } catch {
+                Log.info("Could not read receiver model for cursor suggestion: \(error.localizedDescription)")
+                cursorSuggestion = .unavailable(.unknownModel)
+                return
+            }
+        }
+        guard let model = receiverModel else {
+            cursorSuggestion = .unavailable(.identifyingDevice)
+            return
+        }
+        guard let target = sender.cursorSuggestionTargetSize else {
+            cursorSuggestion = .unavailable(.displayGeometry)
+            return
+        }
+        switch CursorReferenceMetrics.current() {
+        case .failure(let reason):
+            cursorSuggestion = .unavailable(reason)
+        case .success(let reference):
+            let state = CursorSuggestionCalculator.suggest(
+                model: model,
+                panelPixels: CGSize(width: info.facts.pixelsWide, height: info.facts.pixelsHigh),
+                desktopPoints: target, reference: reference)
+            if cursorSuggestion != state { cursorSuggestion = state }
+            if case .available(let suggestion) = state,
+               sender.canApplyInitialCursorSuggestion(for: info),
+               sender.setCursorSize(suggestion.scale, for: info) {
+                Log.info("Applied initial model-based cursor suggestion: \(suggestion.percentage)")
+                refreshCursorSize()
+            }
+        }
     }
 
     init(id: String, target: ConnectionTarget, name: String, sender: MacSender) {
@@ -284,6 +371,7 @@ final class SenderController: ObservableObject {
     private var everOnCable: Set<String> = []
 
     init() {
+        CursorInitialSuggestionPolicy.configure()
         startBrowsing()
         usbWatcher = UsbmuxDeviceWatcher { [weak self] devices in
             guard let self else { return }
@@ -291,11 +379,27 @@ final class SenderController: ObservableObject {
             self.usbDevices = devices
             self.failover(detachedUDIDs: detached)
             self.autoConnect()
+            self.refreshCursorSuggestions()
         }
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
             self.wifiAutoConnectArmed = true
             self.autoConnect()
+        }
+    }
+
+    private func refreshCursorSuggestions() {
+        for session in sessions {
+            let device = usbDevices.first { device in
+                if session.usbUDID == device.udid { return true }
+                if case .usb(let udid?) = session.target, udid == device.udid { return true }
+                return session.deviceID != nil && installIDByUDID[device.udid] == session.deviceID
+            }
+            if let model = device?.productType {
+                session.acceptProductType(model)
+            } else {
+                session.refreshCursorSuggestion()
+            }
         }
     }
 
@@ -658,6 +762,7 @@ final class SenderController: ObservableObject {
             // The learned identity may reveal that this WiFi session's device
             // is cabled — take the upgrade opportunity right away.
             self.autoConnect()
+            self.refreshCursorSuggestions()
         }
         sender.onStats = { [weak session] frames, _ in
             session?.framesSent = frames
@@ -701,6 +806,9 @@ final class SenderController: ObservableObject {
         }
         sender.onTransportPath = { [weak session] wired in
             session?.wired = wired
+        }
+        sender.onCursorGeometryChanged = { [weak self] in
+            self?.refreshCursorSuggestions()
         }
         sender.onPeerClosed = { [weak self, weak session] in
             // The receiver app quit — a deliberate goodbye, so no reconnect
@@ -1120,6 +1228,57 @@ struct SessionRow: View {
     let controller: SenderController
     @State private var confirmingShutdown = false
     @State private var choosingDisplaySize = false
+    @State private var choosingCursorSize = false
+
+    private static let cursorSizeImage: NSImage = {
+        // A template lets the native button style tint both parts together,
+        // including its disabled state. The drawing colors are only a mask.
+        let image = NSImage(size: NSSize(width: 14, height: 13), flipped: true) { _ in
+            guard let context = NSGraphicsContext.current?.cgContext else {
+                Log.info("Could not draw cursor-size icon: graphics context unavailable")
+                return false
+            }
+            let pointer = Path { path in
+                path.addLines([
+                    CGPoint(x: 1, y: 1),
+                    CGPoint(x: 1, y: 10),
+                    CGPoint(x: 3.15, y: 7.85),
+                    CGPoint(x: 5.1, y: 11.8),
+                    CGPoint(x: 6.9, y: 10.85),
+                    CGPoint(x: 4.95, y: 7),
+                    CGPoint(x: 8.8, y: 7)
+                ])
+                path.closeSubpath()
+            }
+            context.setFillColor(CGColor(gray: 0, alpha: 1))
+            context.addPath(pointer.cgPath)
+            context.fillPath()
+
+            let arrows = Path { path in
+                path.move(to: CGPoint(x: 7.4, y: 1.1))
+                path.addLine(to: CGPoint(x: 12.6, y: 6.3))
+                path.addLines([
+                    CGPoint(x: 7.4, y: 3.3),
+                    CGPoint(x: 7.4, y: 1.1),
+                    CGPoint(x: 9.6, y: 1.1)
+                ])
+                path.addLines([
+                    CGPoint(x: 10.4, y: 6.3),
+                    CGPoint(x: 12.6, y: 6.3),
+                    CGPoint(x: 12.6, y: 4.1)
+                ])
+            }
+            context.setStrokeColor(CGColor(gray: 0, alpha: 1))
+            context.setLineWidth(1)
+            context.setLineCap(.round)
+            context.setLineJoin(.round)
+            context.addPath(arrows.cgPath)
+            context.strokePath()
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }()
 
     private var statusColor: Color {
         if session.status.hasPrefix("Extending") || session.status.hasPrefix("Mirroring")
@@ -1178,8 +1337,87 @@ struct SessionRow: View {
                     DisplaySizePicker(session: session)
                 }
             }
+            if session.canChooseCursorSize {
+                Button {
+                    choosingCursorSize = true
+                } label: {
+                    // Share the display-size control's native sizing, not its artwork.
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .hidden()
+                        .overlay {
+                            Image(nsImage: Self.cursorSizeImage)
+                                .renderingMode(.template)
+                        }
+                }
+                .controlSize(.small)
+                .accessibilityLabel("Cursor size of \(title)")
+                .help("Cursor size of \(title)")
+                .popover(isPresented: $choosingCursorSize, arrowEdge: .bottom) {
+                    CursorSizePicker(session: session)
+                }
+            }
             Button("Disconnect") { controller.disconnect(session) }
                 .controlSize(.small)
+        }
+    }
+}
+
+@MainActor
+struct CursorSizePicker: View {
+    @ObservedObject var session: DeviceSession
+
+    private var percentage: String { String(format: "%.0f%%", session.cursorSize * 100) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Cursor size").font(.headline)
+            HStack {
+                Slider(value: Binding(
+                    get: { session.cursorSize },
+                    set: { session.setCursorSize($0) }),
+                       in: CursorSizing.scaleRange, step: CursorSizing.scaleStep)
+                    .accessibilityLabel("Cursor size")
+                    .accessibilityValue(percentage)
+                Text(percentage)
+                    .monospacedDigit()
+                    .frame(width: 44, alignment: .trailing)
+            }
+            .disabled(!session.sender.usesLocalCursor)
+            Button("Reset to 100%") { session.setCursorSize(CursorSizing.defaultScale) }
+                .disabled(!session.sender.usesLocalCursor
+                          || session.cursorSize == CursorSizing.defaultScale)
+            switch session.cursorSuggestion {
+            case .available(let suggestion):
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Suggested size: \(suggestion.percentage)")
+                        .font(.subheadline)
+                    Button("Use \(suggestion.percentage)") { session.useSuggestedCursorSize() }
+                        .disabled(CursorSizing.sameScale(session.cursorSize, suggestion.scale))
+                    Text("Model-based estimate matching the main Mac display. Assumes the iPad receiver fills its screen.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .help(suggestion.profileName)
+                }
+            case .unavailable(let reason):
+                Text("Suggestion unavailable. \(reason.explanation)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(session.sender.usesLocalCursor
+                 ? "Changes only this device's cursor, without restarting video or changing macOS pointer settings."
+                 : "The cursor is captured in the video. Enable the localCursor preference and restart OpenDisplay to use this control.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(width: 280)
+        .fixedSize(horizontal: false, vertical: true)
+        .onAppear {
+            session.refreshCursorSize()
+            session.refreshCursorSuggestion()
         }
     }
 }
@@ -1221,4 +1459,3 @@ struct DisplaySizePicker: View {
         return outcome.caption + (sameAsDefault ? " (same as Default)" : "")
     }
 }
-

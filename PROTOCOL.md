@@ -396,7 +396,10 @@ a PNG (kept under 24000 bytes pre-encoding, see section 4); `nw`, `nh` are
 the sprite's width/height **normalized to the display size**, so the
 receiver can scale it without knowing the sender's HiDPI factor; `ax`, `ay`
 are the hotspot **normalized within the sprite** (0..1 of its own size).
-Sent when the sprite changes and re-sent after reconnects.
+Sent when the sprite or its displayed size changes and re-sent after reconnects.
+A sender-side cursor-size preference scales `nw` and `nh`, not the cursor's
+position or normalized hotspot (`ax`, `ay`). Receivers render the supplied
+dimensions as usual; no new field or protocol-version change is needed.
 
 ### 6.3 Cursor side channel (UDP)
 

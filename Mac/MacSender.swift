@@ -56,6 +56,7 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
     // Fired on every hello — carries the receiver's install id so the
     // controller can deduplicate USB/WiFi sessions to the same device.
     @MainActor var onHello: ((PhoneInfo) -> Void)?
+    @MainActor var onCursorGeometryChanged: (() -> Void)?
     // Fired when the user stopped the capture from the system UI (menu-bar
     // recording indicator / "Stop Extending"). The controller disconnects
     // the session — teardown plus auto-connect opt-out — so the app honors
@@ -212,6 +213,7 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
     // Escape hatch: `defaults write com.peetzweg.opensidecar.mac localCursor -bool false`.
     private let localCursor = UserDefaults.standard.object(forKey: "localCursor") == nil
         || UserDefaults.standard.bool(forKey: "localCursor")
+    var usesLocalCursor: Bool { localCursor }
     // Cursor sampling must not share ScreenCaptureKit's serial callback queue:
     // a 4K encode submission can otherwise delay the next poll long before the
     // dedicated UDP channel gets a chance to help. Sampling lives here; only
@@ -250,7 +252,10 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
     // dial-phase failures take the grace/refusal rules, never this exit.
     private var currentPathDirectLink = false
     private var lastCursorSent: (x: Double, y: Double, visible: Bool) = (-1, -1, false)
-    private var lastCursorPNGHash = 0
+    // Sprite sizing and caches are confined to the main queue, like NSCursor.
+    private var cursorScale = CursorSizing.defaultScale
+    private var lastCursorSprite: CursorSpriteSnapshot?
+    private var cachedCursorPNG: (bitmap: Data, png: Data)?
     // Cursor side channel (UDP, WiFi only): positions queue behind video
     // frames on the shared TCP socket and stutter under head-of-line
     // blocking. Opened when hello advertises cursorPort; while ready,
@@ -500,6 +505,59 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
 
     func displaySizeKey(for info: PhoneInfo) -> String {
         DisplaySizeStore.key(installID: info.id, serial: displaySerial)
+    }
+
+    func cursorSize(for info: PhoneInfo) -> Double {
+        let key = CursorSizeStore.key(installID: info.id, serial: displaySerial)
+        do {
+            return try CursorSizeStore.load(key: key)
+        } catch {
+            Log.info("Invalid cursor size for \(key): \(error.localizedDescription); using 100%")
+            return CursorSizing.defaultScale
+        }
+    }
+
+    var cursorSuggestionSupportsMode: Bool { mode == .extend }
+
+    var cursorSuggestionTargetSize: CGSize? {
+        guard !stopped, captureDisplayID != 0 else { return nil }
+        return CGDisplayBounds(captureDisplayID).size
+    }
+
+    func canApplyInitialCursorSuggestion(for info: PhoneInfo) -> Bool {
+        CursorInitialSuggestionPolicy.canApply(
+            key: CursorSizeStore.key(installID: info.id, serial: displaySerial))
+    }
+
+    @discardableResult
+    func setCursorSize(_ scale: Double, for info: PhoneInfo) -> Bool {
+        let key = CursorSizeStore.key(installID: info.id, serial: displaySerial)
+        let previous: Double?
+        do {
+            previous = try CursorSizeStore.load(key: key)
+        } catch {
+            Log.info("Replacing invalid cursor size for \(key): \(error.localizedDescription)")
+            previous = nil
+        }
+        if CursorSizeStore.hasChoice(key: key), let previous,
+           CursorSizing.sameScale(previous, scale) { return false }
+        do {
+            try CursorSizeStore.save(scale, key: key)
+        } catch {
+            Log.info("Could not set cursor size for \(key): \(error.localizedDescription)")
+            return false
+        }
+        Log.info("cursor size set to \(Int((scale * 100).rounded()))% for \(key)")
+        refreshCursorSize(for: info)
+        return true
+    }
+
+    private func refreshCursorSize(for info: PhoneInfo) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.cursorScale = self.cursorSize(for: info)
+            if self.localCursor, !self.stopped { self.pollCursorImage() }
+        }
     }
 
     /// Store a new choice and resize this session's display in place.
@@ -1214,8 +1272,8 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
             throw error
         }
         captureDisplayID = display.displayID
-        lastCursorPNGHash = 0      // rotation rebuilds: re-send the sprite
         startCursorEcho()
+        Task { @MainActor in self.onCursorGeometryChanged?() }
         // A capture that came back through any path (recovery, rotation,
         // identity fallback) earns the full recovery budget again — without
         // this, a pending recovery timer that finds the stream alive exits
@@ -1557,7 +1615,7 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         // cursor would stay invisible until the user hovers something that
         // changes it. Reset the dedup state to re-send sprite + position to
         // the fresh peer — the cursor analogue of forcing a keyframe.
-        lastCursorPNGHash = 0
+        DispatchQueue.main.async { [weak self] in self?.lastCursorSprite = nil }
         lastReceived = Date()  // fresh grace period for the watchdog
         // An established connection whose interface vanishes does NOT get a
         // .failed/.waiting state update — NW keeps it and flags it non-viable
@@ -2042,15 +2100,19 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
     /// guarded only by `stopped` would stack one extra 30Hz main-thread
     /// TIFF-encode loop per rebuild, creeping CPU to ~50% until a restart (#75).
     private func scheduleCursorImagePoll() {
-        cursorImageTimer?.cancel()
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 0.033, repeating: .milliseconds(33))
-        timer.setEventHandler { [weak self] in
+        DispatchQueue.main.async { [weak self] in
             guard let self, !self.stopped, self.localCursor else { return }
-            self.pollCursorImage()
+            self.lastCursorSprite = nil
+            self.cursorImageTimer?.cancel()
+            let timer = DispatchSource.makeTimerSource(queue: .main)
+            timer.schedule(deadline: .now() + 0.033, repeating: .milliseconds(33))
+            timer.setEventHandler { [weak self] in
+                guard let self, !self.stopped, self.localCursor else { return }
+                self.pollCursorImage()
+            }
+            timer.resume()
+            self.cursorImageTimer = timer
         }
-        timer.resume()
-        cursorImageTimer = timer
     }
 
     private func pollCursorPosition(displayID: CGDirectDisplayID) {
@@ -2207,30 +2269,41 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         // Display size read LIVE, not snapshotted at capture start: the
         // HiDPI mode settles (and macOS re-flips it) asynchronously, and a
         // sprite normalized against the 1x size renders at half size on the
-        // device. Mixing the size into the dedup hash re-sends the sprite
-        // whenever the mode flips, so the proportion always heals.
+        // device. Geometry participates in deduplication, including a live
+        // cursor-size change or a height-only display resize.
         guard connectionReady, captureDisplayID != 0,
               let cursor = NSCursor.currentSystem else { return }
         let displaySize = CGDisplayBounds(captureDisplayID).size   // points, current mode
         guard displaySize.width > 0, displaySize.height > 0 else { return }
         let image = cursor.image
         guard let tiff = image.tiffRepresentation else { return }
-        let hash = tiff.hashValue ^ Int(displaySize.width) &* 31
-        guard hash != lastCursorPNGHash else { return }
-        guard let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]),
-              png.count < 24_000 else { return }
-        lastCursorPNGHash = hash
-        let size = image.size            // Mac points
-        let hot = cursor.hotSpot
+        let geometry: CursorSpriteGeometry
+        do {
+            geometry = try CursorSpriteGeometry(imageSize: image.size, hotspot: cursor.hotSpot,
+                                                displaySize: displaySize, scale: cursorScale)
+        } catch {
+            Log.info("Could not size cursor sprite: \(error.localizedDescription)")
+            return
+        }
+        let snapshot = CursorSpriteSnapshot(bitmap: tiff, geometry: geometry)
+        guard snapshot != lastCursorSprite else { return }
+        let png: Data
+        if let cached = cachedCursorPNG, cached.bitmap == tiff {
+            png = cached.png
+        } else {
+            guard let rep = NSBitmapImageRep(data: tiff),
+                  let encoded = rep.representation(using: .png, properties: [:]),
+                  encoded.count < 24_000 else { return }
+            png = encoded
+            cachedCursorPNG = (tiff, png)
+        }
+        lastCursorSprite = snapshot
         // Normalized against the display so the phone can size/anchor the
         // sprite without knowing capture scale or HiDPI factor.
         let msg = String(format:
             "{\"type\":\"cursorImg\",\"nw\":%.5f,\"nh\":%.5f,\"ax\":%.3f,\"ay\":%.3f,\"png\":\"%@\"}",
-            size.width / displaySize.width,
-            size.height / displaySize.height,
-            size.width > 0 ? hot.x / size.width : 0,
-            size.height > 0 ? hot.y / size.height : 0,
+            geometry.normalizedSize.width, geometry.normalizedSize.height,
+            geometry.anchor.x, geometry.anchor.y,
             png.base64EncodedString())
         queue.async { self.sendJSONFrame(msg) }
     }
@@ -2309,6 +2382,7 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
                 let previous = lastHello
                 lastHello = info
                 helloSeenOnConnection = true
+                refreshCursorSize(for: info)
                 // A fresh dial classifies before the hello names the device —
                 // now that it has, decide again (see the comment on the func).
                 if let conn = connection { refreshDirectLinkClassification(for: conn) }

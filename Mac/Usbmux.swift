@@ -19,6 +19,7 @@ struct UsbmuxDevice: Hashable, Identifiable {
     let deviceID: Int     // usbmuxd's handle — changes on every replug
     let udid: String      // stable hardware identifier
     var name: String?     // lockdown DeviceName ("Philip's iPhone"), best-effort
+    var productType: String? = nil
 
     var id: String { udid }
     var label: String { "\(name ?? "iPhone / iPad") (USB)" }
@@ -61,8 +62,14 @@ enum Usbmux {
     /// Open a TCP connection to `port` on the device. On success the returned
     /// connection is a transparent pipe — usbmuxd is out of the picture.
     static func connect(deviceID: Int, port: UInt16,
-                        queue: DispatchQueue) async throws -> NWConnection {
+                        queue: DispatchQueue, timeout: TimeInterval? = nil) async throws -> NWConnection {
         let conn = try await open(queue: queue)
+        let deadline = timeout.map { seconds -> DispatchWorkItem in
+            let work = DispatchWorkItem { conn.cancel() }
+            queue.asyncAfter(deadline: .now() + seconds, execute: work)
+            return work
+        }
+        defer { deadline?.cancel() }
         do {
             try await send([
                 "MessageType": "Connect",
@@ -102,10 +109,20 @@ enum Usbmux {
     /// answers DeviceName without a pairing session. Note lockdown framing
     /// differs from usbmuxd framing: [UInt32 BE length][XML plist].
     static func deviceName(deviceID: Int, queue: DispatchQueue) async throws -> String {
-        let conn = try await connect(deviceID: deviceID, port: lockdownPort, queue: queue)
-        defer { conn.cancel() }
+        try await deviceValue("DeviceName", deviceID: deviceID, queue: queue)
+    }
+
+    static func productType(deviceID: Int, queue: DispatchQueue) async throws -> String {
+        try await deviceValue("ProductType", deviceID: deviceID, queue: queue)
+    }
+
+    private static func deviceValue(_ key: String, deviceID: Int, queue: DispatchQueue) async throws -> String {
+        let conn = try await connect(deviceID: deviceID, port: lockdownPort, queue: queue, timeout: 5)
+        let timeout = DispatchWorkItem { conn.cancel() }
+        queue.asyncAfter(deadline: .now() + 5, execute: timeout)
+        defer { timeout.cancel(); conn.cancel() }
         let request = try PropertyListSerialization.data(fromPropertyList: [
-            "Request": "GetValue", "Key": "DeviceName", "Label": "OpenDisplay",
+            "Request": "GetValue", "Key": key, "Label": "OpenDisplay",
         ] as [String: Any], format: .xml, options: 0)
         var packet = withUnsafeBytes(of: UInt32(request.count).bigEndian) { Data($0) }
         packet.append(request)
@@ -119,7 +136,7 @@ enum Usbmux {
         guard let plist = try? PropertyListSerialization.propertyList(from: body, format: nil)
                 as? [String: Any],
               let name = plist["Value"] as? String, !name.isEmpty else {
-            throw Failure.protocolError("lockdown GetValue(DeviceName) not answered")
+            throw Failure.protocolError("lockdown GetValue(\(key)) not answered")
         }
         return name
     }
@@ -240,6 +257,7 @@ final class UsbmuxDeviceWatcher {
                 devices[device.deviceID] = device
                 Log.info("usbmux initial device: \(device.udid)")
                 resolveName(deviceID: device.deviceID)
+                resolveProductType(deviceID: device.deviceID)
             }
             publish()
         } catch {
@@ -281,6 +299,7 @@ final class UsbmuxDeviceWatcher {
             devices[deviceID] = device
             publish()
             resolveName(deviceID: deviceID)
+            resolveProductType(deviceID: deviceID)
         case "Detached":
             if let device = devices.removeValue(forKey: deviceID) {
                 Log.info("usbmux detached: \(device.udid)")
@@ -297,6 +316,20 @@ final class UsbmuxDeviceWatcher {
                   devices[deviceID] != nil else { return }
             devices[deviceID]?.name = name
             publish()
+        }
+    }
+
+    private func resolveProductType(deviceID: Int) {
+        guard let udid = devices[deviceID]?.udid else { return }
+        Task {
+            do {
+                let model = try await Usbmux.productType(deviceID: deviceID, queue: queue)
+                guard devices[deviceID]?.udid == udid else { return }
+                devices[deviceID]?.productType = model
+                publish()
+            } catch {
+                Log.info("Could not identify USB receiver model: \(error.localizedDescription)")
+            }
         }
     }
 
