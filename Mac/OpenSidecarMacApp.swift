@@ -1137,6 +1137,56 @@ struct SessionRow: View {
     @State private var choosingDisplaySize = false
     @State private var choosingCursorSize = false
 
+    private static let cursorSizeImage: NSImage = {
+        // A template lets the native button style tint both parts together,
+        // including its disabled state. The drawing colors are only a mask.
+        let image = NSImage(size: NSSize(width: 14, height: 13), flipped: true) { _ in
+            guard let context = NSGraphicsContext.current?.cgContext else {
+                Log.info("Could not draw cursor-size icon: graphics context unavailable")
+                return false
+            }
+            let pointer = Path { path in
+                path.addLines([
+                    CGPoint(x: 1, y: 1),
+                    CGPoint(x: 1, y: 10),
+                    CGPoint(x: 3.15, y: 7.85),
+                    CGPoint(x: 5.1, y: 11.8),
+                    CGPoint(x: 6.9, y: 10.85),
+                    CGPoint(x: 4.95, y: 7),
+                    CGPoint(x: 8.8, y: 7)
+                ])
+                path.closeSubpath()
+            }
+            context.setFillColor(CGColor(gray: 0, alpha: 1))
+            context.addPath(pointer.cgPath)
+            context.fillPath()
+
+            let arrows = Path { path in
+                path.move(to: CGPoint(x: 7.4, y: 1.1))
+                path.addLine(to: CGPoint(x: 12.6, y: 6.3))
+                path.addLines([
+                    CGPoint(x: 7.4, y: 3.3),
+                    CGPoint(x: 7.4, y: 1.1),
+                    CGPoint(x: 9.6, y: 1.1)
+                ])
+                path.addLines([
+                    CGPoint(x: 10.4, y: 6.3),
+                    CGPoint(x: 12.6, y: 6.3),
+                    CGPoint(x: 12.6, y: 4.1)
+                ])
+            }
+            context.setStrokeColor(CGColor(gray: 0, alpha: 1))
+            context.setLineWidth(1)
+            context.setLineCap(.round)
+            context.setLineJoin(.round)
+            context.addPath(arrows.cgPath)
+            context.strokePath()
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }()
+
     private var statusColor: Color {
         if session.status.hasPrefix("Extending") || session.status.hasPrefix("Mirroring")
             || session.status.hasPrefix("Connected") {
@@ -1202,37 +1252,8 @@ struct SessionRow: View {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                         .hidden()
                         .overlay {
-                            ZStack {
-                                Path { path in
-                                    path.addLines([
-                                        CGPoint(x: 1, y: 1),
-                                        CGPoint(x: 1, y: 10),
-                                        CGPoint(x: 3.15, y: 7.85),
-                                        CGPoint(x: 5.1, y: 11.8),
-                                        CGPoint(x: 6.9, y: 10.85),
-                                        CGPoint(x: 4.95, y: 7),
-                                        CGPoint(x: 8.8, y: 7)
-                                    ])
-                                    path.closeSubpath()
-                                }
-                                .fill()
-                                Path { path in
-                                    path.move(to: CGPoint(x: 7.4, y: 1.1))
-                                    path.addLine(to: CGPoint(x: 12.6, y: 6.3))
-                                    path.addLines([
-                                        CGPoint(x: 7.4, y: 3.3),
-                                        CGPoint(x: 7.4, y: 1.1),
-                                        CGPoint(x: 9.6, y: 1.1)
-                                    ])
-                                    path.addLines([
-                                        CGPoint(x: 10.4, y: 6.3),
-                                        CGPoint(x: 12.6, y: 6.3),
-                                        CGPoint(x: 12.6, y: 4.1)
-                                    ])
-                                }
-                                .stroke(style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round))
-                            }
-                            .frame(width: 14, height: 13)
+                            Image(nsImage: Self.cursorSizeImage)
+                                .renderingMode(.template)
                         }
                 }
                 .controlSize(.small)
