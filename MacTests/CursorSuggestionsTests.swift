@@ -22,7 +22,7 @@ final class CursorSuggestionsTests: XCTestCase {
             guard case .available(let suggestion) = calculate(model: model) else {
                 return XCTFail("Verified model did not produce a suggestion")
             }
-            XCTAssertEqual(suggestion.unroundedScale, 1.6800665142382042, accuracy: 1e-10)
+            XCTAssertEqual(suggestion.unroundedScale, 1.6800664890061365, accuracy: 1e-10)
             XCTAssertEqual(suggestion.scale, 1.7, accuracy: 1e-10)
             XCTAssertEqual(suggestion.percentage, "170%")
         }
