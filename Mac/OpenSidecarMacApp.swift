@@ -1198,9 +1198,18 @@ struct SessionRow: View {
                 Button {
                     choosingCursorSize = true
                 } label: {
-                    Image(systemName: "cursorarrow")
+                    ZStack {
+                        Image(systemName: "cursorarrow")
+                            .font(.system(size: 12))
+                            .offset(x: -5, y: 3)
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .offset(x: 5, y: -4)
+                    }
+                    .frame(width: 24, height: 20)
                 }
                 .controlSize(.small)
+                .accessibilityLabel("Cursor size of \(title)")
                 .help("Cursor size of \(title)")
                 .popover(isPresented: $choosingCursorSize, arrowEdge: .bottom) {
                     CursorSizePicker(session: session)

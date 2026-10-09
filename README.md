@@ -142,8 +142,8 @@ iPad is the same codebase. iPad-specific polish (Pencil, pressure) is on the
 roadmap.
 
 **The pointer on my device is too small.**
-In the Mac sender's device row, click the **cursor arrow** button and adjust
-**Cursor size** from 100% to 400%. It updates live without restarting video,
+In the Mac sender's device row, click the **cursor with resize arrows** button
+and adjust **Cursor size** from 100% to 400%. It updates live without restarting video,
 keeps the low-latency local cursor, and does not change macOS's global pointer
 size. The choice is remembered per receiver across reconnects, USB/WiFi changes,
 and rotation; 100% preserves the original size.
