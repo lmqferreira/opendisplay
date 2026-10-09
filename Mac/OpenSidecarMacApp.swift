@@ -1198,15 +1198,42 @@ struct SessionRow: View {
                 Button {
                     choosingCursorSize = true
                 } label: {
-                    ZStack {
-                        Image(systemName: "cursorarrow")
-                            .font(.system(size: 12))
-                            .offset(x: -5, y: 3)
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .offset(x: 5, y: -4)
-                    }
-                    .frame(width: 24, height: 20)
+                    // Share the display-size control's native sizing, not its artwork.
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .hidden()
+                        .overlay {
+                            ZStack {
+                                Path { path in
+                                    path.addLines([
+                                        CGPoint(x: 1, y: 1),
+                                        CGPoint(x: 1, y: 10),
+                                        CGPoint(x: 3.15, y: 7.85),
+                                        CGPoint(x: 5.1, y: 11.8),
+                                        CGPoint(x: 6.9, y: 10.85),
+                                        CGPoint(x: 4.95, y: 7),
+                                        CGPoint(x: 8.8, y: 7)
+                                    ])
+                                    path.closeSubpath()
+                                }
+                                .fill()
+                                Path { path in
+                                    path.move(to: CGPoint(x: 7.4, y: 1.1))
+                                    path.addLine(to: CGPoint(x: 12.6, y: 6.3))
+                                    path.addLines([
+                                        CGPoint(x: 7.4, y: 3.3),
+                                        CGPoint(x: 7.4, y: 1.1),
+                                        CGPoint(x: 9.6, y: 1.1)
+                                    ])
+                                    path.addLines([
+                                        CGPoint(x: 10.4, y: 6.3),
+                                        CGPoint(x: 12.6, y: 6.3),
+                                        CGPoint(x: 12.6, y: 4.1)
+                                    ])
+                                }
+                                .stroke(style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round))
+                            }
+                            .frame(width: 14, height: 13)
+                        }
                 }
                 .controlSize(.small)
                 .accessibilityLabel("Cursor size of \(title)")
