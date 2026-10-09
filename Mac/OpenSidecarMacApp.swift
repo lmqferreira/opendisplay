@@ -160,13 +160,17 @@ final class DeviceSession: ObservableObject, Identifiable {
     @Published private(set) var displaySize: DisplaySize = .default
     @Published private(set) var displaySizeOutcomes: [DisplaySizeOutcome] = []
     @Published private(set) var cursorSize = CursorSizing.defaultScale
+    @Published private(set) var cursorSuggestion: CursorSuggestionState = .unavailable(.identifyingDevice)
+    private var receiverModel: String?
 
     var canChooseCursorSize: Bool { lastHello != nil }
 
     func helloArrived(_ info: PhoneInfo) {
+        if lastHello?.id != info.id { receiverModel = nil }
         lastHello = info
         refreshDisplaySize()
         refreshCursorSize()
+        refreshCursorSuggestion()
     }
 
     func setDisplaySize(_ size: DisplaySize) {
@@ -193,6 +197,74 @@ final class DeviceSession: ObservableObject, Identifiable {
     func refreshCursorSize() {
         guard let info = lastHello else { return }
         cursorSize = sender.cursorSize(for: info)
+    }
+
+    func acceptProductType(_ model: String) {
+        guard let info = lastHello, info.kind == "iPad", let id = info.id, !id.isEmpty,
+              model.hasPrefix("iPad"), model.contains(",") else { return }
+        if receiverModel != model {
+            receiverModel = model
+            CursorDeviceModelStore.save(model, receiverID: id)
+        }
+        refreshCursorSuggestion()
+    }
+
+    func useSuggestedCursorSize() {
+        guard case .available(let suggestion) = cursorSuggestion else { return }
+        setCursorSize(suggestion.scale)
+    }
+
+    func refreshCursorSuggestion() {
+        guard let info = lastHello else { return }
+        guard sender.usesLocalCursor else {
+            cursorSuggestion = .unavailable(.capturedCursor)
+            return
+        }
+        guard sender.cursorSuggestionSupportsMode else {
+            cursorSuggestion = .unavailable(.mirrorMode)
+            return
+        }
+        guard info.kind == "iPad" else {
+            cursorSuggestion = .unavailable(.unknownModel)
+            return
+        }
+        guard let id = info.id, !id.isEmpty else {
+            cursorSuggestion = .unavailable(.receiverIdentity)
+            return
+        }
+        if receiverModel == nil {
+            do {
+                receiverModel = try CursorDeviceModelStore.load(receiverID: id)
+            } catch {
+                Log.info("Could not read receiver model for cursor suggestion: \(error.localizedDescription)")
+                cursorSuggestion = .unavailable(.unknownModel)
+                return
+            }
+        }
+        guard let model = receiverModel else {
+            cursorSuggestion = .unavailable(.identifyingDevice)
+            return
+        }
+        guard let target = sender.cursorSuggestionTargetSize else {
+            cursorSuggestion = .unavailable(.displayGeometry)
+            return
+        }
+        switch CursorReferenceMetrics.current() {
+        case .failure(let reason):
+            cursorSuggestion = .unavailable(reason)
+        case .success(let reference):
+            let state = CursorSuggestionCalculator.suggest(
+                model: model,
+                panelPixels: CGSize(width: info.facts.pixelsWide, height: info.facts.pixelsHigh),
+                desktopPoints: target, reference: reference)
+            if cursorSuggestion != state { cursorSuggestion = state }
+            if case .available(let suggestion) = state,
+               sender.canApplyInitialCursorSuggestion(for: info),
+               sender.setCursorSize(suggestion.scale, for: info) {
+                Log.info("Applied initial model-based cursor suggestion: \(suggestion.percentage)")
+                refreshCursorSize()
+            }
+        }
     }
 
     init(id: String, target: ConnectionTarget, name: String, sender: MacSender) {
@@ -299,6 +371,7 @@ final class SenderController: ObservableObject {
     private var everOnCable: Set<String> = []
 
     init() {
+        CursorInitialSuggestionPolicy.configure()
         startBrowsing()
         usbWatcher = UsbmuxDeviceWatcher { [weak self] devices in
             guard let self else { return }
@@ -306,11 +379,27 @@ final class SenderController: ObservableObject {
             self.usbDevices = devices
             self.failover(detachedUDIDs: detached)
             self.autoConnect()
+            self.refreshCursorSuggestions()
         }
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
             self.wifiAutoConnectArmed = true
             self.autoConnect()
+        }
+    }
+
+    private func refreshCursorSuggestions() {
+        for session in sessions {
+            let device = usbDevices.first { device in
+                if session.usbUDID == device.udid { return true }
+                if case .usb(let udid?) = session.target, udid == device.udid { return true }
+                return session.deviceID != nil && installIDByUDID[device.udid] == session.deviceID
+            }
+            if let model = device?.productType {
+                session.acceptProductType(model)
+            } else {
+                session.refreshCursorSuggestion()
+            }
         }
     }
 
@@ -673,6 +762,7 @@ final class SenderController: ObservableObject {
             // The learned identity may reveal that this WiFi session's device
             // is cabled — take the upgrade opportunity right away.
             self.autoConnect()
+            self.refreshCursorSuggestions()
         }
         sender.onStats = { [weak session] frames, _ in
             session?.framesSent = frames
@@ -716,6 +806,9 @@ final class SenderController: ObservableObject {
         }
         sender.onTransportPath = { [weak session] wired in
             session?.wired = wired
+        }
+        sender.onCursorGeometryChanged = { [weak self] in
+            self?.refreshCursorSuggestions()
         }
         sender.onPeerClosed = { [weak self, weak session] in
             // The receiver app quit — a deliberate goodbye, so no reconnect
@@ -1282,7 +1375,7 @@ struct CursorSizePicker: View {
                 Slider(value: Binding(
                     get: { session.cursorSize },
                     set: { session.setCursorSize($0) }),
-                       in: CursorSizing.scaleRange, step: 0.05)
+                       in: CursorSizing.scaleRange, step: CursorSizing.scaleStep)
                     .accessibilityLabel("Cursor size")
                     .accessibilityValue(percentage)
                 Text(percentage)
@@ -1293,6 +1386,23 @@ struct CursorSizePicker: View {
             Button("Reset to 100%") { session.setCursorSize(CursorSizing.defaultScale) }
                 .disabled(!session.sender.usesLocalCursor
                           || session.cursorSize == CursorSizing.defaultScale)
+            switch session.cursorSuggestion {
+            case .available(let suggestion):
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Suggested size: \(suggestion.percentage)")
+                        .font(.subheadline)
+                    Button("Use \(suggestion.percentage)") { session.useSuggestedCursorSize() }
+                        .disabled(CursorSizing.sameScale(session.cursorSize, suggestion.scale))
+                    Text("Model-based estimate matching the main Mac display. Assumes the iPad receiver fills its screen.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .help(suggestion.profileName)
+                }
+            case .unavailable(let reason):
+                Text("Suggestion unavailable. \(reason.explanation)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Text(session.sender.usesLocalCursor
                  ? "Changes only this device's cursor, without restarting video or changing macOS pointer settings."
                  : "The cursor is captured in the video. Enable the localCursor preference and restart OpenDisplay to use this control.")
@@ -1301,7 +1411,10 @@ struct CursorSizePicker: View {
         }
         .padding(14)
         .frame(width: 280)
-        .onAppear { session.refreshCursorSize() }
+        .onAppear {
+            session.refreshCursorSize()
+            session.refreshCursorSuggestion()
+        }
     }
 }
 

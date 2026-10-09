@@ -56,6 +56,7 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
     // Fired on every hello — carries the receiver's install id so the
     // controller can deduplicate USB/WiFi sessions to the same device.
     @MainActor var onHello: ((PhoneInfo) -> Void)?
+    @MainActor var onCursorGeometryChanged: (() -> Void)?
     // Fired when the user stopped the capture from the system UI (menu-bar
     // recording indicator / "Stop Extending"). The controller disconnects
     // the session — teardown plus auto-connect opt-out — so the app honors
@@ -516,16 +517,39 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         }
     }
 
-    func setCursorSize(_ scale: Double, for info: PhoneInfo) {
+    var cursorSuggestionSupportsMode: Bool { mode == .extend }
+
+    var cursorSuggestionTargetSize: CGSize? {
+        guard !stopped, captureDisplayID != 0 else { return nil }
+        return CGDisplayBounds(captureDisplayID).size
+    }
+
+    func canApplyInitialCursorSuggestion(for info: PhoneInfo) -> Bool {
+        CursorInitialSuggestionPolicy.canApply(
+            key: CursorSizeStore.key(installID: info.id, serial: displaySerial))
+    }
+
+    @discardableResult
+    func setCursorSize(_ scale: Double, for info: PhoneInfo) -> Bool {
         let key = CursorSizeStore.key(installID: info.id, serial: displaySerial)
+        let previous: Double?
+        do {
+            previous = try CursorSizeStore.load(key: key)
+        } catch {
+            Log.info("Replacing invalid cursor size for \(key): \(error.localizedDescription)")
+            previous = nil
+        }
+        if CursorSizeStore.hasChoice(key: key), let previous,
+           CursorSizing.sameScale(previous, scale) { return false }
         do {
             try CursorSizeStore.save(scale, key: key)
         } catch {
             Log.info("Could not set cursor size for \(key): \(error.localizedDescription)")
-            return
+            return false
         }
         Log.info("cursor size set to \(Int((scale * 100).rounded()))% for \(key)")
         refreshCursorSize(for: info)
+        return true
     }
 
     private func refreshCursorSize(for info: PhoneInfo) {
@@ -1249,6 +1273,7 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         captureDisplayID = display.displayID
         startCursorEcho()
+        Task { @MainActor in self.onCursorGeometryChanged?() }
         // A capture that came back through any path (recovery, rotation,
         // identity fallback) earns the full recovery budget again — without
         // this, a pending recovery timer that finds the stream alive exits

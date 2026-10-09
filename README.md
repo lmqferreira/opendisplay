@@ -148,6 +148,21 @@ keeps the low-latency local cursor, and does not change macOS's global pointer
 size. The choice is remembered per receiver across reconnects, USB/WiFi changes,
 and rotation; 100% preserves the original size.
 
+For verified iPad models, the popover also offers a **Suggested size** to match
+the physical cursor size on the main, built-in Mac display. This is a model-based
+estimate using Apple's panel specification, the actual extended desktop size,
+and the Mac's current pointer enlargement. It assumes the iPad receiver fills
+its screen. The model is identified over USB and remembered for later sessions;
+no receiver update or fullscreen confirmation is required.
+
+Initially, verified profiles cover the third-generation 12.9-inch iPad Pro
+(`iPad8,5` through `iPad8,8`). Unknown models, untrustworthy display measurements,
+unavailable pointer settings, Mirror mode, or a physical match outside 100–400%
+produce an explanation rather than a guessed value. Existing choices are
+never replaced automatically. Fresh installations may apply a reliable
+suggestion once per receiver; upgrades retain their previous defaults, including
+an explicit 100% selection. The suggestion can always be applied explicitly.
+
 This control needs the default `localCursor` mode. If you previously enabled
 the captured-system-cursor workaround, restore local rendering with
 `defaults write com.peetzweg.opensidecar.mac localCursor -bool true` and quit

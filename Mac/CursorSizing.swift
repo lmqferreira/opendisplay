@@ -5,6 +5,11 @@ import Foundation
 enum CursorSizing {
     static let scaleRange = 1.0...4.0
     static let defaultScale = 1.0
+    static let scaleStep = 0.05
+
+    static func sameScale(_ lhs: Double, _ rhs: Double) -> Bool {
+        abs(lhs - rhs) < 1e-9
+    }
 
     static func validate(scale: Double) throws {
         guard scale.isFinite, scaleRange.contains(scale) else {
@@ -16,6 +21,7 @@ enum CursorSizing {
 enum CursorSizingError: Error, LocalizedError {
     case invalidScale
     case invalidStoredScale
+    case invalidStoredModel
     case invalidImageSize
     case invalidDisplaySize
     case invalidHotspot
@@ -24,6 +30,7 @@ enum CursorSizingError: Error, LocalizedError {
         switch self {
         case .invalidScale: return "cursor size must be between 100% and 400%"
         case .invalidStoredScale: return "saved cursor size is not a number between 100% and 400%"
+        case .invalidStoredModel: return "saved receiver model is invalid"
         case .invalidImageSize: return "cursor image dimensions must be positive and finite"
         case .invalidDisplaySize: return "cursor display dimensions must be positive and finite"
         case .invalidHotspot: return "cursor hotspot must be finite"
@@ -47,6 +54,10 @@ enum CursorSizeStore {
         return number.doubleValue
     }
 
+    static func hasChoice(key: String, in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: key) != nil || defaults.bool(forKey: key + ".chosen")
+    }
+
     static func save(_ scale: Double, key: String, to defaults: UserDefaults = .standard) throws {
         try CursorSizing.validate(scale: scale)
         if scale == CursorSizing.defaultScale {
@@ -54,6 +65,7 @@ enum CursorSizeStore {
         } else {
             defaults.set(scale, forKey: key)
         }
+        defaults.set(true, forKey: key + ".chosen")
     }
 }
 
