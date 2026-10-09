@@ -1396,21 +1396,25 @@ struct CursorSizePicker: View {
                     Text("Model-based estimate matching the main Mac display. Assumes the iPad receiver fills its screen.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                         .help(suggestion.profileName)
                 }
             case .unavailable(let reason):
                 Text("Suggestion unavailable. \(reason.explanation)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Text(session.sender.usesLocalCursor
                  ? "Changes only this device's cursor, without restarting video or changing macOS pointer settings."
                  : "The cursor is captured in the video. Enable the localCursor preference and restart OpenDisplay to use this control.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
         .frame(width: 280)
+        .fixedSize(horizontal: false, vertical: true)
         .onAppear {
             session.refreshCursorSize()
             session.refreshCursorSuggestion()
