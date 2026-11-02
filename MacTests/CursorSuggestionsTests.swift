@@ -55,6 +55,26 @@ final class CursorSuggestionsTests: XCTestCase {
                        .unavailable(.panelMismatch))
     }
 
+    func testReleaseReceiverWindowGeometryOnlySuggestsForTheFullPanel() throws {
+        let screen = CGSize(width: 1024, height: 1366)
+        for window in [screen, CGSize(width: 512, height: 1366),
+                       CGSize(width: 768, height: 1024)] {
+            let geometry = try XCTUnwrap(ReceiverPanelGeometry(
+                window: window, screen: screen, nativePixels: panel, nativeScale: 2))
+            let result = calculate(
+                panel: CGSize(width: geometry.pixelsWide, height: geometry.pixelsHigh),
+                desktop: window)
+            if window == screen {
+                guard case .available(let suggestion) = result else {
+                    return XCTFail("Fullscreen receiver should retain the verified suggestion")
+                }
+                XCTAssertEqual(suggestion.scale, 1.7, accuracy: 1e-10)
+            } else {
+                XCTAssertEqual(result, .unavailable(.panelMismatch))
+            }
+        }
+    }
+
     func testRejectsNonfiniteAndMissingGeometry() {
         for invalid in [CGSize.zero, CGSize(width: CGFloat.nan, height: 1),
                         CGSize(width: 1, height: CGFloat.infinity)] {
