@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   mac:
-    runs-on: macos-26
+    runs-on: macos-26-intel
     steps:
       - uses: actions/checkout@v6
 
@@ -34,8 +34,10 @@ jobs:
           xcodebuild test \
             -project OpenSidecar.xcodeproj \
             -scheme OpenSidecarMac \
-            -destination 'platform=macOS' \
+            -destination 'platform=macOS,arch=x86_64' \
             -derivedDataPath build \
+            ARCHS="arm64 x86_64" \
+            ONLY_ACTIVE_ARCH=NO \
             MARKETING_VERSION=1.30.1 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -70,7 +72,7 @@ jobs:
   # Same runner, Xcode and Ruby setup as the release workflow's build-ios job,
   # so a pull request finds out when that image stops working, not a release.
   ios:
-    # The upstream Xcode 27.1 runner is not available in this Mac-only fork.
+    # This fork update changes only the Mac sender; use the released receivers.
     if: github.repository == 'peetzweg/opendisplay'
     runs-on: xcode-27
     env:
