@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.30.3](https://github.com/peetzweg/opendisplay/compare/v1.30.2...v1.30.3) (2026-11-14)
+
+
+### Bug Fixes
+
+* **mac:** declare a physical size macOS 26.1 accepts for the virtual display ([#480](https://github.com/peetzweg/opendisplay/issues/480)) ([91b8783](https://github.com/peetzweg/opendisplay/commit/91b87838a8a10309b9378595a6deb31dddaff711))
+* **mac:** dial receivers without the system proxy ([#483](https://github.com/peetzweg/opendisplay/issues/483)) ([ac3b3cb](https://github.com/peetzweg/opendisplay/commit/ac3b3cbfee848807a1a2219b30003b2f612aafb6))
+
+## [1.30.2](https://github.com/peetzweg/opendisplay/compare/v1.30.1...v1.30.2) (2026-11-06)
+
+
+### Bug Fixes
+
+* **linux:** convert captured frames in their own byte order ([#457](https://github.com/peetzweg/opendisplay/issues/457)) ([245e78b](https://github.com/peetzweg/opendisplay/commit/245e78b22702846ffa198de9a91feee28e71e723))
+* **mac:** keep asking an Android phone that adb holds, instead of giving up ([#466](https://github.com/peetzweg/opendisplay/issues/466)) ([710c45c](https://github.com/peetzweg/opendisplay/commit/710c45c8fdd99cf972b39d4f6ff8311366394ff4))
+* **mac:** say why WiFi discovery finds no devices ([#465](https://github.com/peetzweg/opendisplay/issues/465)) ([5e4ff50](https://github.com/peetzweg/opendisplay/commit/5e4ff50000decb66cfc764bc26b82a557fedcd1d))
+
 ## [1.30.1](https://github.com/peetzweg/opendisplay/compare/v1.30.0...v1.30.1) (2026-10-29)
 
 

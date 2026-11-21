@@ -126,6 +126,16 @@ jobs:
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
 
+  # Points the Arch PKGBUILDs on main at the new tag; see arch-bump.yml.
+  bump-arch:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/arch-bump.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+
   build-mac:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'

@@ -161,6 +161,7 @@ targets:
       - Mac/CursorSuggestions.swift
       - Mac/CaptureSourceCheck.swift
       - Mac/AndroidUSBFunction.swift
+      - Mac/USBAccessory.swift
       - Mac/Log.swift
       - Mac/LogPolicies.swift
       - Shared/Protocol.swift
