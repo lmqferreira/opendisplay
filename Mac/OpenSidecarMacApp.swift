@@ -160,6 +160,7 @@ final class DeviceSession: ObservableObject, Identifiable {
     @Published private(set) var displaySize: DisplaySize = .default
     @Published private(set) var displaySizeOutcomes: [DisplaySizeOutcome] = []
     @Published private(set) var cursorSize = CursorSizing.defaultScale
+    @Published private(set) var shakeToLocate = false
     @Published private(set) var cursorSuggestion: CursorSuggestionState = .unavailable(.identifyingDevice)
     private var receiverModel: String?
 
@@ -197,6 +198,13 @@ final class DeviceSession: ObservableObject, Identifiable {
     func refreshCursorSize() {
         guard let info = lastHello else { return }
         cursorSize = sender.cursorSize(for: info)
+        shakeToLocate = sender.shakeToLocate(for: info)
+    }
+
+    func setShakeToLocate(_ enabled: Bool) {
+        guard let info = lastHello else { return }
+        sender.setShakeToLocate(enabled, for: info)
+        refreshCursorSize()
     }
 
     func acceptProductType(_ model: String) {
@@ -1502,6 +1510,14 @@ struct CursorSizePicker: View {
             Button("Reset to 100%") { session.setCursorSize(CursorSizing.defaultScale) }
                 .disabled(!session.sender.usesLocalCursor
                           || session.cursorSize == CursorSizing.defaultScale)
+            Toggle("Shake to locate", isOn: Binding(
+                get: { session.shakeToLocate },
+                set: { session.setShakeToLocate($0) }))
+                .disabled(!session.sender.usesLocalCursor)
+            Text("Shake over this display to enlarge the cursor briefly, up to 400%, then return to your selected size. Does not change saved sizing.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             switch session.cursorSuggestion {
             case .available(let suggestion):
                 VStack(alignment: .leading, spacing: 4) {

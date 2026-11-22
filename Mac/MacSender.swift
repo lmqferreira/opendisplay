@@ -261,6 +261,9 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
     private var lastCursorSent: (x: Double, y: Double, visible: Bool) = (-1, -1, false)
     // Sprite sizing and caches are confined to the main queue, like NSCursor.
     private var cursorScale = CursorSizing.defaultScale
+    private var cursorShakeEnabled = false
+    private var cursorShake = CursorShakeToLocate()
+    private var cursorLocateActive = false
     private var lastCursorSprite: CursorSpriteSnapshot?
     private var cachedCursorPNG: (bitmap: Data, png: Data)?
     // Cursor side channel (UDP, WiFi only): positions queue behind video
@@ -530,6 +533,24 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         }
     }
 
+    func shakeToLocate(for info: PhoneInfo) -> Bool {
+        let key = CursorSizeStore.key(installID: info.id, serial: displaySerial)
+        do {
+            return try CursorShakePreferenceStore.load(cursorKey: key)
+        } catch {
+            Log.info("Invalid shake-to-locate setting for \(key): \(error.localizedDescription); disabled")
+            return false
+        }
+    }
+
+    func setShakeToLocate(_ enabled: Bool, for info: PhoneInfo) {
+        guard shakeToLocate(for: info) != enabled else { return }
+        let key = CursorSizeStore.key(installID: info.id, serial: displaySerial)
+        CursorShakePreferenceStore.save(enabled, cursorKey: key)
+        Log.info("shake to locate \(enabled ? "enabled" : "disabled") for \(key)")
+        refreshCursorSize(for: info)
+    }
+
     var cursorSuggestionSupportsMode: Bool { mode == .extend }
 
     var cursorSuggestionTargetSize: CGSize? {
@@ -569,6 +590,8 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.cursorScale = self.cursorSize(for: info)
+            self.cursorShakeEnabled = self.shakeToLocate(for: info)
+            if !self.cursorShakeEnabled { self.cursorShake.reset() }
             if self.localCursor, !self.stopped { self.pollCursorImage() }
         }
     }
@@ -1792,7 +1815,11 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         // cursor would stay invisible until the user hovers something that
         // changes it. Reset the dedup state to re-send sprite + position to
         // the fresh peer — the cursor analogue of forcing a keyframe.
-        DispatchQueue.main.async { [weak self] in self?.lastCursorSprite = nil }
+        DispatchQueue.main.async { [weak self] in
+            self?.lastCursorSprite = nil
+            self?.cursorShake.reset()
+            self?.cursorLocateActive = false
+        }
         lastReceived = Date()  // fresh grace period for the watchdog
         // An established connection whose interface vanishes does NOT get a
         // .failed/.waiting state update — NW keeps it and flags it non-viable
@@ -2352,6 +2379,8 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.stopped, self.localCursor else { return }
             self.lastCursorSprite = nil
+            self.cursorShake.reset()
+            self.cursorLocateActive = false
             self.cursorImageTimer?.cancel()
             let timer = DispatchSource.makeTimerSource(queue: .main)
             timer.schedule(deadline: .now() + 0.033, repeating: .milliseconds(33))
@@ -2520,16 +2549,32 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         // sprite normalized against the 1x size renders at half size on the
         // device. Geometry participates in deduplication, including a live
         // cursor-size change or a height-only display resize.
-        guard connectionReady, captureDisplayID != 0,
-              let cursor = NSCursor.currentSystem else { return }
-        let displaySize = CGDisplayBounds(captureDisplayID).size   // points, current mode
+        guard connectionReady, captureDisplayID != 0 else {
+            cursorShake.reset()
+            return
+        }
+        guard let cursor = NSCursor.currentSystem else { return }
+        let displayBounds = CGDisplayBounds(captureDisplayID)
+        let displaySize = displayBounds.size   // points, current mode
         guard displaySize.width > 0, displaySize.height > 0 else { return }
         let image = cursor.image
         guard let tiff = image.tiffRepresentation else { return }
         let geometry: CursorSpriteGeometry
         do {
+            let position = cursorShakeEnabled ? CGEvent(source: nil)?.location : nil
+            let onDisplay = position.map { displayBounds.contains($0) } ?? false
+            let scale = try cursorShake.scale(
+                position: position, at: ProcessInfo.processInfo.systemUptime,
+                baseScale: cursorScale,
+                enabled: cursorShakeEnabled && onDisplay && NSEvent.pressedMouseButtons == 0)
+            let locating = !CursorSizing.sameScale(scale, cursorScale)
+            if locating != cursorLocateActive {
+                cursorLocateActive = locating
+                Log.info("cursor locate \(locating ? "started" : "ended"): selected size "
+                    + "\(Int((cursorScale * 100).rounded()))%")
+            }
             geometry = try CursorSpriteGeometry(imageSize: image.size, hotspot: cursor.hotSpot,
-                                                displaySize: displaySize, scale: cursorScale)
+                                                displaySize: displaySize, scale: scale)
         } catch {
             Log.info("Could not size cursor sprite: \(error.localizedDescription)")
             return

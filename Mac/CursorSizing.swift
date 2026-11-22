@@ -22,6 +22,7 @@ enum CursorSizingError: Error, LocalizedError {
     case invalidScale
     case invalidStoredScale
     case invalidStoredModel
+    case invalidStoredShakePreference
     case invalidImageSize
     case invalidDisplaySize
     case invalidHotspot
@@ -31,6 +32,7 @@ enum CursorSizingError: Error, LocalizedError {
         case .invalidScale: return "cursor size must be between 100% and 400%"
         case .invalidStoredScale: return "saved cursor size is not a number between 100% and 400%"
         case .invalidStoredModel: return "saved receiver model is invalid"
+        case .invalidStoredShakePreference: return "saved shake-to-locate setting is not a Boolean"
         case .invalidImageSize: return "cursor image dimensions must be positive and finite"
         case .invalidDisplaySize: return "cursor display dimensions must be positive and finite"
         case .invalidHotspot: return "cursor hotspot must be finite"

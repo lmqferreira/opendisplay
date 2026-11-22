@@ -167,6 +167,18 @@ keeps the low-latency local cursor, and does not change macOS's global pointer
 size. The choice is remembered per receiver across reconnects, USB/WiFi changes,
 and rotation; 100% preserves the original size.
 
+The same popover offers **Shake to locate**, off by default and remembered per
+receiver. Rapid back-and-forth movement over that display briefly enlarges its
+cursor to at most **400% of the original size**, then returns to the selected
+manual or suggested size. It does not multiply the selected size by four or
+change the saved value. Shaking while dragging is ignored. The cursor stays on
+the existing low-latency path, without a video restart or receiver update.
+
+The gesture detection takes inspiration from
+[Alex Severinov's upstream proposal](https://github.com/peetzweg/opendisplay/pull/487);
+the fork preserves its per-device size and uses 5% transient size steps instead
+of the proposal's whole-number scale buckets.
+
 For verified iPad models, the popover also offers a **Suggested size** to match
 the physical cursor size on the main, built-in Mac display. This is a model-based
 estimate using Apple's panel specification, the actual extended desktop size,
