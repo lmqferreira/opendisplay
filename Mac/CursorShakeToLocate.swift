@@ -9,7 +9,8 @@ struct CursorShakeToLocate {
     private static let minimumMovement = 3.0
     private static let reversalWindow = 0.4
     private static let requiredReversals = 3
-    private static let holdDuration = 0.6
+    private static let holdDuration = 0.2
+    private static let fadeDuration = 0.1
     private static let maximumSampleGap = 0.25
     private static let maximumJump = 200.0
 
@@ -82,7 +83,7 @@ struct CursorShakeToLocate {
         if time < enlargedUntil {
             enlargement = min(1, enlargement + dt * 5)
         } else {
-            enlargement = max(0, enlargement - dt * 3)
+            enlargement = max(0, enlargement - dt / Self.fadeDuration)
         }
         if enlargement < 1e-9 { enlargement = 0 }
         if enlargement > 1 - 1e-9 { enlargement = 1 }

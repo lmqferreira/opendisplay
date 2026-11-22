@@ -173,6 +173,9 @@ cursor to at most **400% of the original size**, then returns to the selected
 manual or suggested size. It does not multiply the selected size by four or
 change the saved value. Shaking while dragging is ignored. The cursor stays on
 the existing low-latency path, without a video restart or receiver update.
+After the last detected shake, it holds briefly (0.2 seconds) and fades back
+quickly (about 0.1 seconds). This is OpenDisplay's own timing, not Apple's native
+shake-to-locate implementation.
 
 The gesture detection takes inspiration from
 [Alex Severinov's upstream proposal](https://github.com/peetzweg/opendisplay/pull/487);

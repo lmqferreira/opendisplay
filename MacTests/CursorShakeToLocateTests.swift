@@ -52,6 +52,25 @@ final class CursorShakeToLocateTests: XCTestCase {
         }
     }
 
+    func testQuickFadeReturnsWithin350MillisecondsAtCursorSamplingRates() throws {
+        for fps in [30, 60, 120] {
+            var tracker = CursorShakeToLocate()
+            _ = try trigger(&tracker)
+            let lastShake = 0.16
+            var peak = 1.7
+            var returnedAt: TimeInterval?
+            for frame in 1...fps {
+                let time = lastShake + Double(frame) / Double(fps)
+                let scale = try tracker.scale(position: point, at: time,
+                                              baseScale: 1.7, enabled: true)
+                peak = max(peak, scale)
+                if scale == 1.7, returnedAt == nil { returnedAt = time }
+            }
+            XCTAssertEqual(peak, 4)
+            XCTAssertLessThanOrEqual(try XCTUnwrap(returnedAt) - lastShake, 0.35)
+        }
+    }
+
     func testSmallJitterSlowMovementAndOneWayTravelDoNotTrigger() throws {
         let paths: [[CGPoint]] = [
             (0...10).map { CGPoint(x: 100 + Double($0 % 2) * 0.2, y: 100) },
