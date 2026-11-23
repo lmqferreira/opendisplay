@@ -144,6 +144,15 @@ without it: check Privacy & Security → Local Network on the Mac **and** on
 the iPhone, make sure both are on the same WiFi network, and keep the
 iPhone app open in the foreground. USB mode is unaffected.
 
+**Why is a Teams floating meeting window replaced by a warning?**
+Teams marks some compact meeting/control windows as excluded from screen
+capture. The window still exists on the Mac and can accept input, while
+ScreenCaptureKit omits its pixels — which would otherwise allow blind clicks
+on the receiving device. OpenDisplay detects that state on its virtual display,
+draws a shareable warning over the affected rectangle, and absorbs input there.
+Use the normal Teams meeting window on the OpenDisplay screen instead. OpenDisplay
+does not alter Teams protection or attempt to bypass macOS capture exclusion.
+
 **What USB cable or version do I need?** Your cable **must support data** — a
 charge-only USB cable will **not** work. Look for a cable described as a
 *data*, *sync*, or *charging and data-transfer* cable. A data-capable USB 2.0
