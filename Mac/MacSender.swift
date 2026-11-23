@@ -72,6 +72,8 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
     @MainActor var onDisplayIdentityBumped: ((UInt32) -> Void)?
 
     private var stream: SCStream?
+    private var captureFilterRefreshStream: SCStream?
+    private var captureFilterRefreshGate = CaptureFilterRefreshGate()
     private var encoder: VTCompressionSession?
     private var connection: NWConnection?
     private var virtualDisplay: VirtualDisplay?
@@ -549,6 +551,71 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         CursorShakePreferenceStore.save(enabled, cursorKey: key)
         Log.info("shake to locate \(enabled ? "enabled" : "disabled") for \(key)")
         refreshCursorSize(for: info)
+    }
+
+    func refreshCaptureFilter(_ variant: CaptureFilterRefreshVariant) async throws {
+        let (stream, request) = try beginCaptureFilterRefresh()
+        defer { finishCaptureFilterRefresh(request) }
+        Log.info("capture filter refresh requested: display \(request.target.displayID) "
+            + "generation \(request.target.generation) variant \(variant.rawValue)")
+        let content = try await SCShareableContent.excludingDesktopWindows(
+            true, onScreenWindowsOnly: true)
+        try Task.checkCancellation()
+        guard isCurrentCaptureFilterRefresh(request, stream: stream) else {
+            throw CaptureFilterRefreshError.changed
+        }
+        guard let display = content.displays.first(where: {
+            $0.displayID == request.target.displayID
+        }) else {
+            throw CaptureFilterRefreshError.missingDisplay
+        }
+        let filter: SCContentFilter
+        switch variant {
+        case .display:
+            filter = SCContentFilter(display: display, excludingWindows: [])
+        case .applications:
+            filter = SCContentFilter(display: display, excludingApplications: [],
+                                     exceptingWindows: [])
+        }
+        try await stream.updateContentFilter(filter)
+        try Task.checkCancellation()
+        guard isCurrentCaptureFilterRefresh(request, stream: stream) else {
+            throw CaptureFilterRefreshError.changed
+        }
+        Log.info("capture filter refreshed: display \(request.target.displayID) "
+            + "generation \(request.target.generation) variant \(variant.rawValue)")
+    }
+
+    private func beginCaptureFilterRefresh() throws
+        -> (SCStream, CaptureFilterRefreshGate.Request) {
+        pipelineLock.lock()
+        defer { pipelineLock.unlock() }
+        guard let stream = captureFilterRefreshStream else {
+            throw CaptureFilterRefreshError.unavailable
+        }
+        return (stream, try captureFilterRefreshGate.begin())
+    }
+
+    private func isCurrentCaptureFilterRefresh(_ request: CaptureFilterRefreshGate.Request,
+                                              stream: SCStream) -> Bool {
+        pipelineLock.lock()
+        defer { pipelineLock.unlock() }
+        return captureFilterRefreshStream === stream && captureFilterRefreshGate.isCurrent(request)
+    }
+
+    private func finishCaptureFilterRefresh(_ request: CaptureFilterRefreshGate.Request) {
+        pipelineLock.lock()
+        defer { pipelineLock.unlock() }
+        captureFilterRefreshGate.finish(request)
+    }
+
+    private func publishCaptureFilterRefreshTarget(stream: SCStream, displayID: CGDirectDisplayID,
+                                                  generation: UInt64) {
+        pipelineLock.lock()
+        defer { pipelineLock.unlock() }
+        guard captureGeneration == generation else { return }
+        captureFilterRefreshStream = stream
+        captureFilterRefreshGate.activate(displayID: displayID, generation: generation)
     }
 
     var cursorSuggestionSupportsMode: Bool { mode == .extend }
@@ -1460,6 +1527,8 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
             throw error
         }
         captureDisplayID = display.displayID
+        publishCaptureFilterRefreshTarget(stream: stream, displayID: display.displayID,
+                                          generation: generation)
         startCursorEcho()
         Task { @MainActor in self.onCursorGeometryChanged?() }
         // A capture that came back through any path (recovery, rotation,
@@ -3487,6 +3556,8 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
     private func invalidateCapturePipeline(discardingLastFrame: Bool = false) {
         pipelineLock.lock()
         captureGeneration &+= 1
+        captureFilterRefreshStream = nil
+        captureFilterRefreshGate.invalidate()
         activeStreamConfiguration = nil
         frameRateLimiter = FrameRateLimiter(framesPerSecond: 60)
         pipelineLock.unlock()

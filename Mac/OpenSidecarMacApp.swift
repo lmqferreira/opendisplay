@@ -162,6 +162,8 @@ final class DeviceSession: ObservableObject, Identifiable {
     @Published private(set) var cursorSize = CursorSizing.defaultScale
     @Published private(set) var shakeToLocate = false
     @Published private(set) var cursorSuggestion: CursorSuggestionState = .unavailable(.identifyingDevice)
+    @Published private(set) var refreshingCaptureFilter = false
+    @Published private(set) var captureRefreshStatus: String?
     private var receiverModel: String?
 
     var canChooseCursorSize: Bool { lastHello != nil }
@@ -205,6 +207,23 @@ final class DeviceSession: ObservableObject, Identifiable {
         guard let info = lastHello else { return }
         sender.setShakeToLocate(enabled, for: info)
         refreshCursorSize()
+    }
+
+    func refreshCaptureFilter(_ variant: CaptureFilterRefreshVariant) {
+        guard !refreshingCaptureFilter else { return }
+        refreshingCaptureFilter = true
+        captureRefreshStatus = "Refreshing capture…"
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.refreshingCaptureFilter = false }
+            do {
+                try await self.sender.refreshCaptureFilter(variant)
+                self.captureRefreshStatus = "Capture refreshed (\(variant.rawValue)); check the device."
+            } catch {
+                self.captureRefreshStatus = error.localizedDescription
+                Log.info("capture filter refresh failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     func acceptProductType(_ model: String) {
@@ -1426,6 +1445,12 @@ struct SessionRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                if let refreshStatus = session.captureRefreshStatus {
+                    Text(refreshStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
             Spacer()
             // A live session recovers on its own (liveness watchdog, redial,
@@ -1480,6 +1505,20 @@ struct SessionRow: View {
                     CursorSizePicker(session: session)
                 }
             }
+            #if DEBUG
+            Menu {
+                Button("Refresh capture") { session.refreshCaptureFilter(.display) }
+                Button("Refresh capture (alternate filter)") {
+                    session.refreshCaptureFilter(.applications)
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .controlSize(.small)
+            .disabled(session.failed || session.refreshingCaptureFilter)
+            .accessibilityLabel("Capture troubleshooting for \(title)")
+            .help("Refresh this display's capture without disconnecting it")
+            #endif
             Button("Disconnect") { controller.disconnect(session) }
                 .controlSize(.small)
         }
