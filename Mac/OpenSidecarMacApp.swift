@@ -321,6 +321,13 @@ final class SenderController: ObservableObject {
     @Published var quality = StreamQuality(rawValue: UserDefaults.standard.string(forKey: "quality") ?? "") ?? .best {
         didSet { UserDefaults.standard.set(quality.rawValue, forKey: "quality") }
     }
+    @Published var warnOnProtectedTeamsWindows =
+        ProtectedCaptureOverlayPreference.load() {
+        didSet {
+            ProtectedCaptureOverlayPreference.save(warnOnProtectedTeamsWindows)
+            ProtectedCaptureOverlayController.shared.setEnabled(warnOnProtectedTeamsWindows)
+        }
+    }
 
     var running: Bool { !sessions.isEmpty }
 
@@ -1246,6 +1253,14 @@ struct ContentView: View {
                     .controlSize(.small)
                 }
                 .help("Opens System Settings → Displays, where you can position the extended displays relative to your Mac screen (Arrange…). Each device shows up as its own display, named after the device.")
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Warn about protected Teams windows",
+                           isOn: $controller.warnOnProtectedTeamsWindows)
+                    Text("Shows a recovery warning instead of invisible, still-clickable controls when Teams marks a compact window as excluded from screen capture.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 Section("Permissions") {
                     permissionRow(

@@ -121,6 +121,18 @@ private extension NSBezierPath {
     }
 }
 
+enum ProtectedCaptureOverlayPreference {
+    static let preferenceKey = "warnOnProtectedTeamsWindows"
+
+    static func load(from defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: preferenceKey) as? Bool ?? true
+    }
+
+    static func save(_ enabled: Bool, to defaults: UserDefaults = .standard) {
+        defaults.set(enabled, forKey: preferenceKey)
+    }
+}
+
 @MainActor
 final class ProtectedCaptureOverlayController {
     static let shared = ProtectedCaptureOverlayController()
@@ -128,9 +140,25 @@ final class ProtectedCaptureOverlayController {
     private var displays: [UUID: CGDirectDisplayID] = [:]
     private var panels: [CGWindowID: NSPanel] = [:]
     private var timer: Timer?
+    private var enabled = ProtectedCaptureOverlayPreference.load()
+
+    func setEnabled(_ enabled: Bool) {
+        guard self.enabled != enabled else { return }
+        self.enabled = enabled
+        ProtectedCaptureOverlayPreference.save(enabled)
+        if enabled {
+            schedule()
+            refresh()
+        } else {
+            timer?.invalidate()
+            timer = nil
+            closeAllPanels()
+        }
+    }
 
     func start(token: UUID, displayID: CGDirectDisplayID) {
         displays[token] = displayID
+        guard enabled else { return }
         schedule()
         refresh()
     }
@@ -152,6 +180,10 @@ final class ProtectedCaptureOverlayController {
     }
 
     private func refresh() {
+        guard enabled else {
+            closeAllPanels()
+            return
+        }
         let active = displays.values.compactMap { displayID -> CGRect? in
             let bounds = CGDisplayBounds(displayID)
             return bounds.isEmpty ? nil : bounds
@@ -234,6 +266,12 @@ final class ProtectedCaptureOverlayController {
         return panel
     }
 
+    private func closeAllPanels() {
+        let existing = panels.values
+        panels.removeAll()
+        for panel in existing { panel.close() }
+    }
+
     private func moveOverlayBackToMain(_ overlay: ProtectedCaptureOverlay) {
         let targetBounds = CGDisplayBounds(CGMainDisplayID())
         let target = NSPoint(
@@ -248,6 +286,7 @@ final class ProtectedCaptureOverlayController {
             Log.info("Could not move protected Teams window: accessibility window list unavailable")
             return
         }
+
         for window in windows {
             var positionValue: CFTypeRef?
             guard AXUIElementCopyAttributeValue(

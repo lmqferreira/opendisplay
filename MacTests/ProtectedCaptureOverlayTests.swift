@@ -76,4 +76,15 @@ final class ProtectedCaptureOverlayTests: XCTestCase {
             CGRect(x: 1828, y: 964, width: 334, height: 120)
         )
     }
+
+    func testWarningPreferenceDefaultsEnabledAndPersistsChoice() {
+        let suite = "ProtectedCaptureOverlayTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertTrue(ProtectedCaptureOverlayPreference.load(from: defaults))
+        ProtectedCaptureOverlayPreference.save(false, to: defaults)
+        XCTAssertFalse(ProtectedCaptureOverlayPreference.load(from: defaults))
+        ProtectedCaptureOverlayPreference.save(true, to: defaults)
+        XCTAssertTrue(ProtectedCaptureOverlayPreference.load(from: defaults))
+    }
 }

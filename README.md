@@ -153,7 +153,9 @@ draws a shareable warning over the affected rectangle, and absorbs input there.
 The warning includes **Move to main display**, so an accidentally placed compact
 window can always be recovered. OpenDisplay does not alter Teams protection or
 attempt to bypass macOS capture exclusion. Use the normal Teams meeting window
-on the OpenDisplay screen for meeting controls.
+on the OpenDisplay screen for meeting controls. Disable the warning at any time
+with **Warn about protected Teams windows** in the sender settings; it defaults
+to on.
 
 **What USB cable or version do I need?** Your cable **must support data** — a
 charge-only USB cable will **not** work. Look for a cable described as a
