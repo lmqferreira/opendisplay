@@ -25,7 +25,7 @@ enum ProtectedCaptureOverlayDetector {
         var seen = Set<CGWindowID>()
         return windows.compactMap { window in
             guard !seen.contains(window.id),
-                  window.owner == "Microsoft Teams",
+                  window.owner.hasPrefix("Microsoft Teams"),
                   window.isOnscreen,
                   window.alpha > 0.01,
                   window.layer > 0,

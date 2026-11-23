@@ -45,6 +45,18 @@ final class ProtectedCaptureOverlayTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
     }
 
+    func testTeamsFixtureAndTeamsWebViewPrefixesUseTheSameDetector() {
+        let display = CGRect(x: 1728, y: 0, width: 1024, height: 1366)
+        let result = ProtectedCaptureOverlayDetector.teamsOverlays(
+            windows: [
+                window(id: 1, owner: "Microsoft Teams Capture Fixture"),
+                window(id: 2, owner: "Unrelated Teams Helper")
+            ],
+            displayBounds: display
+        )
+        XCTAssertEqual(result.map(\.windowID), [1])
+    }
+
     func testSameProtectedWindowOutsideTargetDisplayIsIgnored() {
         let result = ProtectedCaptureOverlayDetector.teamsOverlays(
             windows: [window(bounds: CGRect(x: 100, y: 40, width: 334, height: 120))],
