@@ -11,7 +11,7 @@ final class ProtectedCaptureOverlayTests: XCTestCase {
         onscreen: Bool = true
     ) -> ProtectedCaptureOverlayWindow {
         ProtectedCaptureOverlayWindow(
-            id: id, owner: owner, bounds: bounds, layer: layer,
+            id: id, processID: 123, owner: owner, bounds: bounds, layer: layer,
             sharingState: sharing, alpha: 1, isOnscreen: onscreen
         )
     }
@@ -25,6 +25,8 @@ final class ProtectedCaptureOverlayTests: XCTestCase {
         XCTAssertEqual(result, [
             ProtectedCaptureOverlay(
                 windowID: 1,
+                processID: 123,
+                sourceBounds: CGRect(x: 1700, y: 40, width: 334, height: 120),
                 captureBounds: CGRect(x: 1728, y: 40, width: 306, height: 120),
                 windowLayer: 19
             )

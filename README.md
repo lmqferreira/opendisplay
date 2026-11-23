@@ -150,8 +150,10 @@ capture. The window still exists on the Mac and can accept input, while
 ScreenCaptureKit omits its pixels — which would otherwise allow blind clicks
 on the receiving device. OpenDisplay detects that state on its virtual display,
 draws a shareable warning over the affected rectangle, and absorbs input there.
-Use the normal Teams meeting window on the OpenDisplay screen instead. OpenDisplay
-does not alter Teams protection or attempt to bypass macOS capture exclusion.
+The warning includes **Move to main display**, so an accidentally placed compact
+window can always be recovered. OpenDisplay does not alter Teams protection or
+attempt to bypass macOS capture exclusion. Use the normal Teams meeting window
+on the OpenDisplay screen for meeting controls.
 
 **What USB cable or version do I need?** Your cable **must support data** — a
 charge-only USB cable will **not** work. Look for a cable described as a

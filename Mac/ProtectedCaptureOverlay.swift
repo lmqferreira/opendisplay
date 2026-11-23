@@ -3,6 +3,7 @@ import CoreGraphics
 
 struct ProtectedCaptureOverlayWindow: Equatable {
     let id: CGWindowID
+    let processID: pid_t
     let owner: String
     let bounds: CGRect
     let layer: Int
@@ -13,6 +14,8 @@ struct ProtectedCaptureOverlayWindow: Equatable {
 
 struct ProtectedCaptureOverlay: Equatable {
     let windowID: CGWindowID
+    let processID: pid_t
+    let sourceBounds: CGRect
     let captureBounds: CGRect
     let windowLayer: Int
 }
@@ -35,6 +38,8 @@ enum ProtectedCaptureOverlayDetector {
             seen.insert(window.id)
             return ProtectedCaptureOverlay(
                 windowID: window.id,
+                processID: window.processID,
+                sourceBounds: window.bounds,
                 captureBounds: clipped,
                 windowLayer: window.layer
             )
@@ -53,37 +58,60 @@ enum ProtectedCaptureOverlayDetector {
 }
 
 private final class ProtectedCaptureOverlayView: NSView {
-    var message = "Teams controls are protected from screen capture.\nUse the full Teams window; clicks here are blocked."
+    var onMoveToMain: (() -> Void)?
+    private let messageField = NSTextField(labelWithString:
+        "Teams controls are protected from capture.")
+    private let moveButton = NSButton(
+        title: "Move to main display",
+        target: nil,
+        action: nil
+    )
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        messageField.alignment = .center
+        messageField.textColor = .white
+        messageField.lineBreakMode = .byWordWrapping
+        messageField.maximumNumberOfLines = 2
+        moveButton.bezelStyle = .rounded
+        moveButton.controlSize = .regular
+        moveButton.target = self
+        moveButton.action = #selector(moveToMain)
+        addSubview(messageField)
+        addSubview(moveButton)
+    }
+
+    required init?(coder: NSCoder) { fatalError("Not used") }
+
+    @objc private func moveToMain() {
+        onMoveToMain?()
+    }
+
+    override func layout() {
+        super.layout()
+        let buttonSize = NSSize(width: min(190, max(bounds.width - 24, 80)), height: 28)
+        moveButton.frame = NSRect(
+            x: (bounds.width - buttonSize.width) / 2,
+            y: 12,
+            width: buttonSize.width,
+            height: buttonSize.height
+        )
+        messageField.font = NSFont.systemFont(
+            ofSize: min(max(bounds.height / 8, 12), 16), weight: .semibold)
+        messageField.frame = NSRect(
+            x: 12, y: 46, width: bounds.width - 24, height: max(bounds.height - 56, 20)
+        )
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor(calibratedRed: 0.12, green: 0.12, blue: 0.14, alpha: 0.97).setFill()
         bounds.fill()
         NSColor.systemOrange.setStroke()
         NSBezierPath(rect: bounds.insetBy(dx: 2, dy: 2)).withLineWidth(4).stroke()
-        let style = NSMutableParagraphStyle()
-        style.alignment = .center
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: min(max(bounds.height / 7, 12), 18),
-                                      weight: .semibold),
-            .foregroundColor: NSColor.white,
-            .paragraphStyle: style
-        ]
-        let attributed = NSAttributedString(string: message, attributes: attributes)
-        let text = attributed.boundingRect(
-            with: NSSize(width: max(bounds.width - 20, 1), height: bounds.height),
-            options: [.usesLineFragmentOrigin, .usesFontLeading])
-        attributed.draw(in: NSRect(
-            x: max(10, (bounds.width - text.width) / 2),
-            y: (bounds.height - text.height) / 2,
-            width: min(text.width, bounds.width - 20),
-            height: text.height
-        ))
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) {}
-    override func mouseDragged(with event: NSEvent) {}
-    override func mouseUp(with event: NSEvent) {}
 }
 
 private extension NSBezierPath {
@@ -133,12 +161,14 @@ final class ProtectedCaptureOverlayController {
         ) as? [[String: Any]] ?? []
         let windows = metadata.compactMap { item -> ProtectedCaptureOverlayWindow? in
             guard let id = item[kCGWindowNumber as String] as? Int,
+                  let processID = item[kCGWindowOwnerPID as String] as? pid_t,
                   let owner = item[kCGWindowOwnerName as String] as? String,
                   let boundsDictionary = item[kCGWindowBounds as String] as? [String: Any],
                   let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary)
             else { return nil }
             return ProtectedCaptureOverlayWindow(
                 id: CGWindowID(id),
+                processID: processID,
                 owner: owner,
                 bounds: bounds,
                 layer: item[kCGWindowLayer as String] as? Int ?? 0,
@@ -163,6 +193,11 @@ final class ProtectedCaptureOverlayController {
         }
         for (id, overlay) in wanted {
             let panel = panels[id] ?? makePanel(for: id)
+            if let view = panel.contentView as? ProtectedCaptureOverlayView {
+                view.onMoveToMain = { [weak self] in
+                    self?.moveOverlayBackToMain(overlay)
+                }
+            }
             let frame = ProtectedCaptureOverlayDetector.appKitFrame(
                 from: overlay.captureBounds,
                 mainDisplayHeight: CGDisplayBounds(CGMainDisplayID()).height
@@ -195,7 +230,46 @@ final class ProtectedCaptureOverlayController {
         panel.contentView = ProtectedCaptureOverlayView(frame: .zero)
         panel.sharingType = .readOnly
         panels[id] = panel
-        Log.info("Protected Teams overlay detected: window \(id); showing blocking capture warning")
+        Log.info("Protected Teams overlay detected: window \(id); showing recovery warning")
         return panel
+    }
+
+    private func moveOverlayBackToMain(_ overlay: ProtectedCaptureOverlay) {
+        let targetBounds = CGDisplayBounds(CGMainDisplayID())
+        let target = NSPoint(
+            x: targetBounds.minX + 24,
+            y: min(targetBounds.minY + 80, targetBounds.maxY - overlay.sourceBounds.height)
+        )
+        let app = AXUIElementCreateApplication(overlay.processID)
+        var windowsValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            app, kAXWindowsAttribute as CFString, &windowsValue
+        ) == .success, let windows = windowsValue as? [AXUIElement] else {
+            Log.info("Could not move protected Teams window: accessibility window list unavailable")
+            return
+        }
+        for window in windows {
+            var positionValue: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(
+                window, kAXPositionAttribute as CFString, &positionValue
+            ) == .success, let positionValue else { continue }
+            var position = CGPoint.zero
+            guard AXValueGetValue(
+                positionValue as! AXValue, .cgPoint, &position
+            ) else { continue }
+            guard abs(position.x - overlay.sourceBounds.minX) <= 2,
+                  abs(position.y - overlay.sourceBounds.minY) <= 2 else { continue }
+            var targetPosition = target
+            let value = AXValueCreate(.cgPoint, &targetPosition)!
+            let result = AXUIElementSetAttributeValue(
+                window, kAXPositionAttribute as CFString, value
+            )
+            Log.info(result == .success
+                ? "Moved protected Teams window \(overlay.windowID) back to the main display"
+                : "Could not move protected Teams window \(overlay.windowID): AX error \(result.rawValue)")
+            if result == .success { refresh() }
+            return
+        }
+        Log.info("Could not move protected Teams window \(overlay.windowID): matching AX window not found")
     }
 }
