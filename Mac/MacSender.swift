@@ -72,6 +72,7 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
     @MainActor var onDisplayIdentityBumped: ((UInt32) -> Void)?
 
     private var stream: SCStream?
+    private let protectedOverlayToken = UUID()
     private var encoder: VTCompressionSession?
     private var connection: NWConnection?
     private var virtualDisplay: VirtualDisplay?
@@ -1460,6 +1461,13 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
             throw error
         }
         captureDisplayID = display.displayID
+        if mode == .extend {
+            let token = protectedOverlayToken
+            let displayID = display.displayID
+            Task { @MainActor in
+                ProtectedCaptureOverlayController.shared.start(token: token, displayID: displayID)
+            }
+        }
         startCursorEcho()
         Task { @MainActor in self.onCursorGeometryChanged?() }
         // A capture that came back through any path (recovery, rotation,
@@ -3490,7 +3498,15 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         activeStreamConfiguration = nil
         frameRateLimiter = FrameRateLimiter(framesPerSecond: 60)
         pipelineLock.unlock()
+        let token = protectedOverlayToken
+        let previousDisplayID = captureDisplayID
         captureDisplayID = 0
+        if previousDisplayID != 0 {
+            Task { @MainActor in
+                ProtectedCaptureOverlayController.shared.stop(
+                    token: token, displayID: previousDisplayID)
+            }
+        }
         queue.async { self.captureSourceCheck = CaptureSourceCheck() }
         if discardingLastFrame {
             lastPixelBuffer = nil
