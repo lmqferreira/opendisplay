@@ -438,24 +438,25 @@ final class SenderController: ObservableObject {
                 return session.deviceID != nil && installIDByUDID[device.udid] == session.deviceID
             }
 
-            private func handleScreenSleep() {
-                guard ScreenSleepPolicy.shouldTearDown(
-                    activeSessions: sessions.count,
-                    screenSlept: true
-                ) else { return }
-                Log.info("Mac screens slept — ending \(sessions.count) active display session(s) "
-                    + "to avoid retaining a stale receiver image")
-                // Treat screen sleep as privacy teardown, not as a device disconnect.
-                // Do not arm the reconnect/auto-connect path here; the user reconnects
-                // deliberately after unlocking.
-                disconnectAll()
-            }
             if let model = device?.productType {
                 session.acceptProductType(model)
             } else {
                 session.refreshCursorSuggestion()
             }
         }
+    }
+
+    private func handleScreenSleep() {
+        guard ScreenSleepPolicy.shouldTearDown(
+            activeSessions: sessions.count,
+            screenSlept: true
+        ) else { return }
+        Log.info("Mac screens slept — ending \(sessions.count) active display session(s) "
+            + "to avoid retaining a stale receiver image")
+        // Treat screen sleep as privacy teardown, not as a device disconnect.
+        // Do not arm the reconnect/auto-connect path here; the user reconnects
+        // deliberately after unlocking.
+        disconnectAll()
     }
 
     private func startBrowsing() {
