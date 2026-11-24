@@ -341,6 +341,7 @@ final class SenderController: ObservableObject {
     private var lastLoggedReceivers: [String]?
     private var usbWatcher: UsbmuxDeviceWatcher?
     private var accessoryWatcher: AccessoryDeviceWatcher?
+    private var screenSleepObserver: NSObjectProtocol?
 
     // Connection policy — one session per physical device, and the cable
     // wins whenever it's available (lower, steadier latency than WiFi):
@@ -405,6 +406,14 @@ final class SenderController: ObservableObject {
 
     init() {
         CursorInitialSuggestionPolicy.configure()
+        screenSleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.screensDidSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in self.handleScreenSleep() }
+        }
         startBrowsing()
         usbWatcher = UsbmuxDeviceWatcher { [weak self] devices in
             self?.usbmuxDevices = devices
@@ -427,6 +436,19 @@ final class SenderController: ObservableObject {
                 if session.usbUDID == device.udid { return true }
                 if case .usb(let udid?) = session.target, udid == device.udid { return true }
                 return session.deviceID != nil && installIDByUDID[device.udid] == session.deviceID
+            }
+
+            private func handleScreenSleep() {
+                guard ScreenSleepPolicy.shouldTearDown(
+                    activeSessions: sessions.count,
+                    screenSlept: true
+                ) else { return }
+                Log.info("Mac screens slept — ending \(sessions.count) active display session(s) "
+                    + "to avoid retaining a stale receiver image")
+                // Treat screen sleep as privacy teardown, not as a device disconnect.
+                // Do not arm the reconnect/auto-connect path here; the user reconnects
+                // deliberately after unlocking.
+                disconnectAll()
             }
             if let model = device?.productType {
                 session.acceptProductType(model)
