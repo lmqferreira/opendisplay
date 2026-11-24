@@ -60,11 +60,11 @@ enum ProtectedCaptureOverlayDetector {
 private final class ProtectedCaptureOverlayView: NSView {
     var onMoveToMain: (() -> Void)?
     private let messageField = NSTextField(labelWithString:
-        "Teams controls are protected from capture.")
-    private let moveButton = NSButton(
-        title: "Move to main display",
-        target: nil,
-        action: nil
+        "Teams controls are hidden from capture")
+    private let detailField = NSTextField(labelWithString:
+        "The window is still active, but its pixels cannot be shown here.")
+    private let moveButton = ProtectedCaptureOverlayActionButton(
+        title: "Move to main display"
     )
 
     override init(frame frameRect: NSRect) {
@@ -72,13 +72,17 @@ private final class ProtectedCaptureOverlayView: NSView {
         wantsLayer = true
         messageField.alignment = .center
         messageField.textColor = .white
+        messageField.lineBreakMode = .byTruncatingTail
+        detailField.alignment = .center
+        detailField.textColor = NSColor(calibratedWhite: 0.78, alpha: 1)
+        detailField.lineBreakMode = .byWordWrapping
+        detailField.maximumNumberOfLines = 2
         messageField.lineBreakMode = .byWordWrapping
         messageField.maximumNumberOfLines = 2
-        moveButton.bezelStyle = .rounded
-        moveButton.controlSize = .regular
         moveButton.target = self
         moveButton.action = #selector(moveToMain)
         addSubview(messageField)
+        addSubview(detailField)
         addSubview(moveButton)
     }
 
@@ -90,28 +94,68 @@ private final class ProtectedCaptureOverlayView: NSView {
 
     override func layout() {
         super.layout()
-        let buttonSize = NSSize(width: min(190, max(bounds.width - 24, 80)), height: 28)
+        let buttonSize = NSSize(width: min(220, max(bounds.width - 32, 120)), height: 34)
         moveButton.frame = NSRect(
             x: (bounds.width - buttonSize.width) / 2,
-            y: 12,
+            y: 14,
             width: buttonSize.width,
             height: buttonSize.height
         )
-        messageField.font = NSFont.systemFont(
-            ofSize: min(max(bounds.height / 8, 12), 16), weight: .semibold)
+        messageField.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
         messageField.frame = NSRect(
-            x: 12, y: 46, width: bounds.width - 24, height: max(bounds.height - 56, 20)
+            x: 16, y: bounds.height - 38, width: bounds.width - 32, height: 22
+        )
+        detailField.font = NSFont.systemFont(ofSize: 11)
+        detailField.frame = NSRect(
+            x: 24, y: bounds.height - 64, width: bounds.width - 48, height: 24
         )
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor(calibratedRed: 0.12, green: 0.12, blue: 0.14, alpha: 0.97).setFill()
-        bounds.fill()
-        NSColor.systemOrange.setStroke()
-        NSBezierPath(rect: bounds.insetBy(dx: 2, dy: 2)).withLineWidth(4).stroke()
+        NSColor(calibratedRed: 0.055, green: 0.06, blue: 0.075, alpha: 0.98).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 10, yRadius: 10).fill()
+        NSColor(calibratedWhite: 0.34, alpha: 1).setStroke()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5),
+                     xRadius: 9, yRadius: 9).withLineWidth(3).stroke()
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+private final class ProtectedCaptureOverlayActionButton: NSButton {
+    init(title: String) {
+        super.init(frame: .zero)
+        self.title = title
+        bezelStyle = .shadowlessSquare
+        isBordered = false
+        font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        setButtonType(.momentaryPushIn)
+    }
+
+    required init?(coder: NSCoder) { fatalError("Not used") }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let fill = isHighlighted
+            ? NSColor(calibratedRed: 0.88, green: 0.56, blue: 0.02, alpha: 1)
+            : NSColor(calibratedRed: 1.0, green: 0.66, blue: 0.08, alpha: 1)
+        fill.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
+        attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+                .foregroundColor: NSColor(calibratedWhite: 0.06, alpha: 1)
+            ]
+        )
+        let titleRect = attributedTitle.boundingRect(
+            with: bounds.size, options: [.usesLineFragmentOrigin])
+        attributedTitle.draw(in: NSRect(
+            x: (bounds.width - titleRect.width) / 2,
+            y: (bounds.height - titleRect.height) / 2,
+            width: titleRect.width,
+            height: titleRect.height
+        ))
+    }
 }
 
 private extension NSBezierPath {
