@@ -288,7 +288,6 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
     // whatever is not newer.
     private var cursorChannelConfirmed = false
     private var cursorConnectionReady = false
-    private var cursorChannelRetry = CursorChannelRetry()
     private var cursorSeq: UInt64 = 0
     // The TCP fallback crosses from `cursorQueue` to the sender `queue`.
     // Carry the session that owned the sample so a position queued just before
@@ -1792,7 +1791,6 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         Log.info("connection ready to \(endpointName)")
         connectionGeneration &+= 1
         let readyGeneration = connectionGeneration
-        cursorChannelRetry.reset()
         // Per-session; the receiver rewound its floor with the connection.
         // Keep both cursor-side resets on the cursor queue so reconnects do
         // not race the 120 Hz sampler. Publishing the matching generation in
@@ -2485,7 +2483,6 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
         cursorChannelPort = udpPort
         cursorConnectionGeneration = connectionGeneration
         cursorNetworkLock.unlock()
-        let generation = connectionGeneration
         // cursorSeq is session-scoped (reset in becomeReady), not per flow:
         // TCP frames carry the same sequence, and a flow-local restart would
         // read as stale against a floor the TCP path already advanced.
@@ -2526,23 +2523,8 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
                         && !self.cursorChannelConfirmed
                     self.cursorNetworkLock.unlock()
                     guard unconfirmed else { return }
-                    let retryDelay = self.cursorChannelRetry.nextDelay()
+                    Log.info("cursor channel: no ack after 3s — staying on TCP")
                     self.closeCursorChannel()
-                    if let retryDelay {
-                        Log.info("cursor channel: no ack after 3s — retrying in "
-                            + String(format: "%.0fs (%d/%d)",
-                                     retryDelay,
-                                     self.cursorChannelRetry.attempts,
-                                     CursorChannelRetry.maximumAttempts))
-                        self.queue.asyncAfter(deadline: .now() + retryDelay) { [weak self] in
-                            guard let self, !self.stopped,
-                                  self.connectionGeneration == generation,
-                                  self.connectionReady else { return }
-                            self.openCursorChannel(port: port)
-                        }
-                    } else {
-                        Log.info("cursor channel: no ack after retries — staying on TCP")
-                    }
                 }
             case .failed(let error):
                 Log.info("cursor channel failed: \(error), cursor stays on TCP")
@@ -2695,7 +2677,6 @@ final class MacSender: NSObject, SCStreamOutput, SCStreamDelegate {
             if becameConfirmed { cursorChannelConfirmed = true }
             cursorNetworkLock.unlock()
             if becameConfirmed {
-                cursorChannelRetry.confirmed()
                 Log.info("cursor channel confirmed by the receiver")
             }
         case "hello":

@@ -161,7 +161,6 @@ targets:
       - Mac/CursorSuggestions.swift
       - Mac/CursorShakeToLocate.swift
       - Mac/CaptureSourceCheck.swift
-      - Mac/CursorChannelRetry.swift
       - Mac/ProtectedCaptureOverlay.swift
       - Mac/AndroidUSBFunction.swift
       - Mac/USBAccessory.swift
