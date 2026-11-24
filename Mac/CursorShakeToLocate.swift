@@ -6,10 +6,10 @@ import Foundation
 /// Only transient enlargement is tracked here; the saved device size is the base.
 struct CursorShakeToLocate {
     private static let minimumSpeed = 600.0
-    private static let minimumMovement = 24.0
-    private static let minimumShakeDistance = 120.0
+    private static let minimumMovement = 75.0
+    private static let minimumShakeDistance = 525.0
     private static let reversalWindow = 0.35
-    private static let requiredReversals = 3
+    private static let requiredReversals = 6
     private static let holdDuration = 0.2
     private static let fadeDuration = 0.1
     private static let maximumSampleGap = 0.25

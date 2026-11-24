@@ -8,8 +8,8 @@ final class CursorShakeToLocateTests: XCTestCase {
                          vertical: Bool = false) throws -> Double {
         _ = try tracker.scale(position: point, at: 0, baseScale: base, enabled: true)
         var result = base
-        for index in 1...4 {
-            let offset = index % 2 == 0 ? 0.0 : 40.0
+        for index in 1...7 {
+            let offset = index % 2 == 0 ? 0.0 : 80.0
             let position = CGPoint(x: 100 + (vertical ? 0 : offset),
                                    y: 100 + (vertical ? offset : 0))
             result = try tracker.scale(position: position, at: Double(index) * 0.04,
@@ -24,7 +24,7 @@ final class CursorShakeToLocateTests: XCTestCase {
             XCTAssertGreaterThan(try trigger(&tracker, vertical: vertical), 1.7)
             var largest = 1.7
             var result = 1.7
-            for index in 5...40 {
+            for index in 8...50 {
                 result = try tracker.scale(position: point, at: Double(index) * 0.04,
                                            baseScale: 1.7, enabled: true)
                 XCTAssertGreaterThanOrEqual(result, 1.7)
@@ -41,7 +41,7 @@ final class CursorShakeToLocateTests: XCTestCase {
             var tracker = CursorShakeToLocate()
             _ = try trigger(&tracker, base: base)
             var peak = base
-            for index in 5...16 {
+            for index in 8...20 {
                 let scale = try tracker.scale(position: point, at: Double(index) * 0.04,
                                               baseScale: base, enabled: true)
                 XCTAssertLessThanOrEqual(scale, 4)
@@ -56,7 +56,7 @@ final class CursorShakeToLocateTests: XCTestCase {
         for fps in [30, 60, 120] {
             var tracker = CursorShakeToLocate()
             _ = try trigger(&tracker)
-            let lastShake = 0.16
+            let lastShake = 0.28
             var peak = 1.7
             var returnedAt: TimeInterval?
             for frame in 1...fps {
@@ -85,26 +85,28 @@ final class CursorShakeToLocateTests: XCTestCase {
             }
         }
 
-        func testOrdinaryFastTurnsDoNotEnlargeUnlessTheShakeHasSustainedTravel() throws {
-            let paths: [[Double]] = [
-                [8, 0, 8, 0, 8, 0],                 // rapid but tiny zig-zag
-                [22, 0, 22, 0, 22, 0],              // previous 3pt-detector false positive
-                [45, 0, 45]                          // too few reversals
-            ]
-            for xs in paths {
-                var tracker = CursorShakeToLocate()
-                _ = try tracker.scale(position: point, at: 0, baseScale: 1.7, enabled: true)
-                for (index, offset) in xs.enumerated() {
-                    XCTAssertEqual(
-                        try tracker.scale(
-                            position: CGPoint(x: 100 + offset, y: 100),
-                            at: Double(index + 1) * 0.04,
-                            baseScale: 1.7,
-                            enabled: true
-                        ),
-                        1.7
-                    )
-                }
+    }
+
+    func testOrdinaryFastTurnsDoNotEnlargeUnlessTheShakeHasSustainedTravel() throws {
+        let paths: [[Double]] = [
+            [8, 0, 8, 0, 8, 0],
+            [22, 0, 22, 0, 22, 0],
+            [70, 0, 70, 0, 70, 0, 70, 0],
+            [80, 0, 80, 0]
+        ]
+        for xs in paths {
+            var tracker = CursorShakeToLocate()
+            _ = try tracker.scale(position: point, at: 0, baseScale: 1.7, enabled: true)
+            for (index, offset) in xs.enumerated() {
+                XCTAssertEqual(
+                    try tracker.scale(
+                        position: CGPoint(x: 100 + offset, y: 100),
+                        at: Double(index + 1) * 0.04,
+                        baseScale: 1.7,
+                        enabled: true
+                    ),
+                    1.7
+                )
             }
         }
     }
@@ -123,11 +125,11 @@ final class CursorShakeToLocateTests: XCTestCase {
         for enabled in [false, true] {
             var tracker = CursorShakeToLocate()
             _ = try trigger(&tracker)
-            XCTAssertEqual(try tracker.scale(position: enabled ? nil : point, at: 0.2,
+            XCTAssertEqual(try tracker.scale(position: enabled ? nil : point, at: 0.32,
                                             baseScale: 1.7, enabled: enabled), 1.7)
-            XCTAssertEqual(try tracker.scale(position: point, at: 0.24,
+            XCTAssertEqual(try tracker.scale(position: point, at: 0.36,
                                             baseScale: 1.7, enabled: true), 1.7)
-            XCTAssertEqual(try tracker.scale(position: CGPoint(x: 120, y: 100), at: 0.28,
+            XCTAssertEqual(try tracker.scale(position: CGPoint(x: 180, y: 100), at: 0.4,
                                             baseScale: 1.7, enabled: true), 1.7)
         }
     }
@@ -147,7 +149,7 @@ final class CursorShakeToLocateTests: XCTestCase {
         var tracker = CursorShakeToLocate()
         _ = try trigger(&tracker)
         tracker.reset()
-        XCTAssertEqual(try tracker.scale(position: point, at: 0.2,
+        XCTAssertEqual(try tracker.scale(position: point, at: 0.32,
                                         baseScale: 1.7, enabled: true), 1.7)
     }
 
@@ -155,7 +157,7 @@ final class CursorShakeToLocateTests: XCTestCase {
         var tracker = CursorShakeToLocate()
         _ = try trigger(&tracker)
         var result = 1.85
-        for index in 5...40 {
+        for index in 8...50 {
             result = try tracker.scale(position: point, at: Double(index) * 0.04,
                                        baseScale: 1.85, enabled: true)
             XCTAssertGreaterThanOrEqual(result, 1.85)
@@ -177,7 +179,7 @@ final class CursorShakeToLocateTests: XCTestCase {
         XCTAssertNotEqual(CursorSpriteSnapshot(bitmap: Data([1]), geometry: original),
                           CursorSpriteSnapshot(bitmap: Data([1]), geometry: enlarged))
         var sizes = Set<Double>()
-        for index in 5...10 {
+        for index in 8...14 {
             let scale = try tracker.scale(position: point, at: Double(index) * 0.04,
                                           baseScale: 1.7, enabled: true)
             XCTAssertEqual(scale / 0.05, (scale / 0.05).rounded(), accuracy: 1e-9)
