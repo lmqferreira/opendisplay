@@ -9,7 +9,7 @@ final class CursorShakeToLocateTests: XCTestCase {
         _ = try tracker.scale(position: point, at: 0, baseScale: base, enabled: true)
         var result = base
         for index in 1...4 {
-            let offset = index % 2 == 0 ? 0.0 : 20.0
+            let offset = index % 2 == 0 ? 0.0 : 40.0
             let position = CGPoint(x: 100 + (vertical ? 0 : offset),
                                    y: 100 + (vertical ? offset : 0))
             result = try tracker.scale(position: position, at: Double(index) * 0.04,
@@ -82,6 +82,29 @@ final class CursorShakeToLocateTests: XCTestCase {
             for (index, position) in path.enumerated() {
                 XCTAssertEqual(try tracker.scale(position: position, at: Double(index) * 0.04,
                                                 baseScale: 1.7, enabled: true), 1.7)
+            }
+        }
+
+        func testOrdinaryFastTurnsDoNotEnlargeUnlessTheShakeHasSustainedTravel() throws {
+            let paths: [[Double]] = [
+                [8, 0, 8, 0, 8, 0],                 // rapid but tiny zig-zag
+                [22, 0, 22, 0, 22, 0],              // previous 3pt-detector false positive
+                [45, 0, 45]                          // too few reversals
+            ]
+            for xs in paths {
+                var tracker = CursorShakeToLocate()
+                _ = try tracker.scale(position: point, at: 0, baseScale: 1.7, enabled: true)
+                for (index, offset) in xs.enumerated() {
+                    XCTAssertEqual(
+                        try tracker.scale(
+                            position: CGPoint(x: 100 + offset, y: 100),
+                            at: Double(index + 1) * 0.04,
+                            baseScale: 1.7,
+                            enabled: true
+                        ),
+                        1.7
+                    )
+                }
             }
         }
     }

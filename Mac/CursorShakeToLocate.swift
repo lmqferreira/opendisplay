@@ -5,9 +5,10 @@ import Foundation
 /// Gesture thresholds follow the shake-to-locate idea in upstream PR #487.
 /// Only transient enlargement is tracked here; the saved device size is the base.
 struct CursorShakeToLocate {
-    private static let minimumSpeed = 250.0
-    private static let minimumMovement = 3.0
-    private static let reversalWindow = 0.4
+    private static let minimumSpeed = 600.0
+    private static let minimumMovement = 24.0
+    private static let minimumShakeDistance = 120.0
+    private static let reversalWindow = 0.35
     private static let requiredReversals = 3
     private static let holdDuration = 0.2
     private static let fadeDuration = 0.1
@@ -19,6 +20,7 @@ struct CursorShakeToLocate {
     private var lastDirection: CGPoint?
     private var lastFastMovement: TimeInterval?
     private var reversals = 0
+    private var shakeDistance = 0.0
     private var enlargedUntil: TimeInterval = 0
     private var enlargement = 0.0
 
@@ -66,8 +68,10 @@ struct CursorShakeToLocate {
         if let lastFastMovement, time - lastFastMovement > Self.reversalWindow {
             lastDirection = nil
             reversals = 0
+            shakeDistance = 0
         }
         if distance >= Self.minimumMovement, distance / dt >= Self.minimumSpeed {
+            shakeDistance += distance
             let direction = CGPoint(x: dx / distance, y: dy / distance)
             if let previousDirection = lastDirection,
                previousDirection.x * direction.x + previousDirection.y * direction.y < -0.5 {
@@ -75,9 +79,11 @@ struct CursorShakeToLocate {
             }
             lastDirection = direction
             lastFastMovement = time
-            if reversals >= Self.requiredReversals {
+            if reversals >= Self.requiredReversals,
+               shakeDistance >= Self.minimumShakeDistance {
                 enlargedUntil = time + Self.holdDuration
                 reversals = 0
+                shakeDistance = 0
             }
         }
         if time < enlargedUntil {
